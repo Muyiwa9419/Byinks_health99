@@ -1,8 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
-import { User, UserRole, Transaction, Appointment, AppNotification } from '../types.ts';
-// Fixed: Updated import to use the renamed summarizePatientHistory function
+import React, { useState, useEffect, useRef } from 'react';
+import { User, UserRole, Transaction, AppNotification } from '../types.ts';
 import { summarizePatientHistory } from '../services/geminiService.ts';
 
 interface Message {
@@ -46,7 +45,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const sessionRef = useRef<any>(null);
+  const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const timerRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -108,71 +107,77 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
 
   const stopMedia = () => {
     streamRef.current?.getTracks().forEach(track => track.stop());
-    sessionRef.current?.close();
     if (audioContextRef.current) audioContextRef.current.close();
     if (timerRef.current) clearInterval(timerRef.current);
   };
 
   const connectToGeminiLive = async (stream: MediaStream) => {
+    if (!process.env.API_KEY) {
+      console.warn("AI Scribe unavailable: Missing API Key.");
+      return;
+    }
+
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const inputCtx = new AudioContext({ sampleRate: 16000 });
-      await inputCtx.resume();
+      audioContextRef.current = inputCtx;
       
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-09-2025',
         config: {
           responseModalities: [Modality.AUDIO],
-          inputAudioTranscription: {}, // Capture user voice
-          outputAudioTranscription: {}, // Capture model voice
-          systemInstruction: `You are a Clinical Scribe. Transcribe the healthcare consultation between ${currentUser.name} (Patient) and Dr. ${targetUser.name} (Specialist). Summarize symptoms and diagnostic patterns discussed.`
+          inputAudioTranscription: {}, 
+          outputAudioTranscription: {}, 
+          systemInstruction: `You are a Clinical Scribe for Byinks Health. You are listening to a session between ${currentUser.name} and Dr. ${targetUser.name}. Transcribe the conversation and identify medical symptoms or concerns.`
         },
         callbacks: {
           onopen: () => {
             const source = inputCtx.createMediaStreamSource(stream);
-            const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+            const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
             
-            processor.onaudioprocess = (e) => {
+            scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              const int16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
+              const l = inputData.length;
+              const int16 = new Int16Array(l);
+              for (let i = 0; i < l; i++) {
                 int16[i] = inputData[i] * 32768;
               }
               const pcmData = new Uint8Array(int16.buffer);
               const base64 = encode(pcmData);
               
-              sessionPromise.then(s => s.sendRealtimeInput({ 
-                media: { data: base64, mimeType: 'audio/pcm;rate=16000' } 
-              }));
+              sessionPromise.then((session) => {
+                session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } });
+              });
             };
             
-            source.connect(processor);
-            processor.connect(inputCtx.destination);
+            source.connect(scriptProcessor);
+            scriptProcessor.connect(inputCtx.destination);
           },
-          onmessage: async (msg: LiveServerMessage) => {
-            // Handle both input and output transcription for complete scribe logs
-            if (msg.serverContent?.outputTranscription) {
-              setTranscription(prev => (prev + '\nAI: ' + msg.serverContent!.outputTranscription!.text).slice(-1000));
-            } else if (msg.serverContent?.inputTranscription) {
-              setTranscription(prev => (prev + '\nUser: ' + msg.serverContent!.inputTranscription!.text).slice(-1000));
+          onmessage: async (message: LiveServerMessage) => {
+            if (message.serverContent?.outputTranscription) {
+              setTranscription(prev => (prev + '\nAI: ' + message.serverContent!.outputTranscription!.text).slice(-1500));
+            } else if (message.serverContent?.inputTranscription) {
+              setTranscription(prev => (prev + '\nUser: ' + message.serverContent!.inputTranscription!.text).slice(-1500));
             }
           },
-          onerror: (e) => console.error("Clinical AI Error:", e),
-          onclose: () => console.log("AI Scribe Session Disconnected")
+          onerror: (e) => console.error("Clinical AI Scribe Error:", e),
+          onclose: () => console.log("Clinical AI Scribe Disconnected")
         }
       });
-      sessionRef.current = await sessionPromise;
+      sessionPromiseRef.current = sessionPromise;
     } catch (e) {
-      console.warn("Gemini Live Engine unreachable. Falling back to text-only mode.", e);
+      console.warn("Clinical AI failed to initialize.", e);
     }
   };
 
   const syncAiInsights = async () => {
-    if (messages.length === 0) return;
+    if (messages.length === 0) {
+      alert("Awaiting more clinical data for synchronization.");
+      return;
+    }
     setIsAiLoading(true);
     try {
       const historyStr = messages.map(m => `${m.senderName}: ${m.text}`).join('\n');
-      // Fixed: Used summarizePatientHistory instead of summarizeConversation
       const analysis = await summarizePatientHistory(historyStr);
       setAiAnalysis(analysis);
     } catch (err) {
@@ -290,7 +295,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                       </div>
                     </div>
                     <div className="flex space-x-3">
-                      <button onClick={syncAiInsights} disabled={isAiLoading} className="p-2 bg-white/5 text-emerald-500 hover:bg-white/10 rounded-xl transition border border-white/5">
+                      <button onClick={syncAiInsights} disabled={isAiLoading} className="p-2 bg-white/5 text-emerald-500 hover:bg-white/10 rounded-xl transition border border-white/5" title="Generate AI Clinical Insights">
                         {isAiLoading ? <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" fill="none"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" className="opacity-75" fill="none"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
                       </button>
                       <button onClick={endSession} className="p-2 bg-white/5 text-slate-500 hover:text-white rounded-xl transition border border-white/5">
@@ -338,7 +343,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
             <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-3xl">
               <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest block mb-3">Live Scribe Logs</span>
               <p className="text-[11px] text-slate-400 leading-relaxed font-medium italic whitespace-pre-wrap">
-                {transcription || 'Awaiting clinical data stream from microphone...'}
+                {transcription || 'Awaiting clinical data stream from session...'}
               </p>
             </div>
 

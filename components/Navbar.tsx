@@ -55,17 +55,25 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
 
   const handleImport = () => {
     try {
-      if (!syncToken.trim()) return;
+      if (!syncToken.trim()) {
+        alert("Please paste a valid Cloud Token first.");
+        return;
+      }
       const data = JSON.parse(atob(syncToken));
-      Object.entries(data).forEach(([key, val]) => {
-        const fullKey = `medi_${key === 'users' ? 'registered_users' : key === 'apps' ? 'appointments' : key === 'trans' ? 'transactions' : key === 'logs' ? 'audit_logs' : key === 'avail' ? 'availability' : 'notifications'}`;
-        if (val) localStorage.setItem(fullKey, val as string);
-      });
-      window.dispatchEvent(new Event('storage'));
-      alert("Synchronization Successful. Your clinical network is now updated.");
+      
+      // Update each collection
+      if (data.users) localStorage.setItem('medi_registered_users', data.users);
+      if (data.apps) localStorage.setItem('medi_appointments', data.apps);
+      if (data.trans) localStorage.setItem('medi_transactions', data.trans);
+      if (data.logs) localStorage.setItem('medi_audit_logs', data.logs);
+      if (data.avail) localStorage.setItem('medi_availability', data.avail);
+      if (data.notifs) localStorage.setItem('medi_notifications', data.notifs);
+
+      alert("Synchronization Successful. The Clinical Hub will now refresh.");
       setIsSyncOpen(false);
+      window.location.reload(); // Force refresh to re-initialize state from new storage
     } catch (e) {
-      alert("Invalid Cloud Token. Please ensure you copied the full string.");
+      alert("Synchronization Error: The provided token is invalid or corrupted.");
     }
   };
 
@@ -215,19 +223,19 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
         </div>
       )}
 
-      {/* Sync Mobility Hub Modal */}
+      {/* Sync Mobility Hub Modal - PROVISION FOR PASTING TOKEN */}
       {isSyncOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsSyncOpen(false)}></div>
           <div className="relative w-full max-w-lg bg-white rounded-[3rem] shadow-2xl p-10 overflow-hidden" ref={syncRef}>
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 blur-2xl opacity-50"></div>
-            <h3 className="text-2xl font-black text-slate-900 mb-2 relative z-10">Byinks Global Sync</h3>
-            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8 relative z-10">Cloud Mobility Hub</p>
+            <h3 className="text-2xl font-black text-slate-900 mb-2 relative z-10">Global Clinical Sync</h3>
+            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8 relative z-10">Hybrid Infrastructure Tool</p>
             
             <div className="space-y-8 relative z-10">
               <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Export Identity</h4>
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">Generate a secure token to synchronize this device's hospital state with another device.</p>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Device Export</h4>
+                <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">Generate a secure clinical token to replicate this device's data to another terminal.</p>
                 <button 
                   onClick={handleExport}
                   className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition"
@@ -237,11 +245,12 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
               </div>
 
               <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Import Identity</h4>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Device Import</h4>
+                <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">Paste the token from your other medical terminal below to synchronize records.</p>
                 <textarea 
                   value={syncToken}
                   onChange={(e) => setSyncToken(e.target.value)}
-                  placeholder="Paste token from other device..."
+                  placeholder="Paste token here..."
                   className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-[9px] font-mono outline-none focus:border-emerald-600 transition mb-4"
                 />
                 <button 

@@ -83,6 +83,15 @@ export const ClinicalAPI = {
     }
   },
 
+  async getAllUsers(): Promise<User[]> {
+    if (this.isConfigured()) {
+      const { data, error } = await supabase!.from('profiles').select('*');
+      return error ? [] : data.map(d => ({ ...d, isApproved: d.is_approved, bloodType: d.blood_type })) as User[];
+    } else {
+      return getLocalCollection<User>('registered_users');
+    }
+  },
+
   async saveProfile(user: User): Promise<void> {
     if (this.isConfigured()) {
       const { error } = await supabase!.from('profiles').upsert({
@@ -97,6 +106,27 @@ export const ClinicalAPI = {
       const idx = users.findIndex(u => u.id === user.id);
       if (idx > -1) users[idx] = user; else users.push(user);
       saveLocalCollection('registered_users', users);
+    }
+  },
+
+  async updateUserStatus(userId: string, updates: Partial<User>): Promise<void> {
+    if (this.isConfigured()) {
+      const { error } = await supabase!
+        .from('profiles')
+        .update({
+          role: updates.role,
+          specialty: updates.specialty,
+          is_approved: updates.isApproved
+        })
+        .eq('id', userId);
+      if (error) throw error;
+    } else {
+      const users = getLocalCollection<User>('registered_users');
+      const idx = users.findIndex(u => u.id === userId);
+      if (idx > -1) {
+        users[idx] = { ...users[idx], ...updates };
+        saveLocalCollection('registered_users', users);
+      }
     }
   },
 
