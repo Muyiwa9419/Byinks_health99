@@ -13,7 +13,7 @@ const Services: React.FC = () => {
   ];
 
   return (
-    <div className="bg-white min-h-screen pt-32 pb-20">
+    <div className="bg-white min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-6">
         <div className="text-center max-w-3xl mx-auto mb-20 animate-in fade-in slide-in-from-bottom-4 duration-700">
           <h1 className="text-xs font-black uppercase tracking-[0.5em] text-emerald-600 mb-6">Medical Excellence</h1>

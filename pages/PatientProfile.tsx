@@ -96,7 +96,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-12 pt-32 animate-in fade-in duration-500">
+    <div className="max-w-7xl mx-auto px-6 py-12 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row justify-between items-start mb-12 gap-8">
         <div className="flex items-center space-x-8">
           <div className="w-24 h-24 bg-emerald-600 rounded-[2.5rem] flex items-center justify-center text-white text-4xl font-black shadow-2xl shadow-emerald-200">

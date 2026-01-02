@@ -216,7 +216,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
   const confirmedForSelected = appointments.filter(a => a.date === selectedDay && a.status === 'confirmed');
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500 pt-24">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-6">
         <div>
           <h1 className="text-4xl font-black text-slate-900 tracking-tight">Clinical Workspace</h1>

@@ -30,7 +30,7 @@ const Toast: React.FC<{ notification: AppNotification; onClose: () => void }> = 
 );
 
 const PendingApproval: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
-  <div className="min-h-[calc(100vh-64px)] flex items-center justify-center bg-slate-50 p-4">
+  <div className="min-h-[calc(100vh-128px)] flex items-center justify-center bg-slate-50 p-4">
     <div className="bg-white p-12 rounded-3xl shadow-xl max-w-lg text-center border border-slate-100">
       <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6">
         <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -104,7 +104,7 @@ const App: React.FC = () => {
         
         {activeToast && <Toast notification={activeToast} onClose={() => setActiveToast(null)} />}
 
-        <main className="flex-grow">
+        <main className="flex-grow pt-32">
           <Routes>
             <Route path="/" element={<HospitalHome />} />
             <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login onLogin={handleLogin} />} />

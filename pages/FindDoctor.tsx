@@ -33,7 +33,7 @@ const FindDoctor: React.FC = () => {
   });
 
   return (
-    <div className="bg-white min-h-screen pt-32 pb-20">
+    <div className="bg-white min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-6">
         {/* Header Section */}
         <div className="text-center max-w-3xl mx-auto mb-16 animate-in fade-in slide-in-from-bottom-4 duration-700">

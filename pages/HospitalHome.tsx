@@ -22,7 +22,7 @@ const HospitalHome: React.FC = () => {
   return (
     <div className="bg-white selection:bg-emerald-100 selection:text-emerald-900 overflow-x-hidden">
       {/* Hero Section */}
-      <section className="relative min-h-[95vh] flex items-center pt-20 overflow-hidden">
+      <section className="relative min-h-[80vh] flex items-center overflow-hidden">
         {/* Abstract Background Elements */}
         <div className="absolute top-0 right-0 w-1/2 h-full bg-slate-50 -z-10 rounded-l-[20rem] hidden lg:block"></div>
         <div className="absolute -top-24 -left-24 w-96 h-96 bg-emerald-50 rounded-full blur-3xl opacity-60"></div>
