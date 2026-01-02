@@ -1,12 +1,11 @@
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, RealtimeChannel } from '@supabase/supabase-js';
 import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest } from '../types.ts';
 
 /**
  * Clinical Hybrid API Service
- * Primary: Supabase Cloud
- * Fallback: Local Persisted Simulation (Cloud Vault)
- * Real-time: BroadcastChannel Bridge
+ * Primary: Supabase Cloud (Global Sync)
+ * Fallback: Local Persisted Simulation (Same-Device Sync)
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -16,7 +15,7 @@ export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
 
-// Global Bridge for cross-tab real-time reflection
+// Global Bridge for cross-tab (same device) sync
 const clinicalBridge = new BroadcastChannel('medi_clinical_bridge');
 
 const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getItem(`medi_${key}`) || '[]');
@@ -36,8 +35,31 @@ export const ClinicalAPI = {
   },
 
   /**
-   * Scans local storage for all clinical data including chats
+   * Subscribes to cross-device messages using Supabase Realtime
    */
+  subscribeToClinicalCloud(chatId: string, onMessage: (msg: any) => void): RealtimeChannel | null {
+    if (!supabase) return null;
+
+    const channel = supabase.channel(`chat:${chatId}`)
+      .on('broadcast', { event: 'new_message' }, ({ payload }) => {
+        onMessage(payload);
+      })
+      .subscribe();
+    
+    return channel;
+  },
+
+  broadcastMessage(chatId: string, message: any) {
+    if (supabase) {
+      const channel = supabase.channel(`chat:${chatId}`);
+      channel.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: message,
+      });
+    }
+  },
+
   getClinicalSnapshot() {
     const snapshot: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) {
@@ -49,9 +71,6 @@ export const ClinicalAPI = {
     return snapshot;
   },
 
-  /**
-   * Restores a clinical snapshot into local storage
-   */
   restoreClinicalSnapshot(snapshot: Record<string, string>) {
     Object.entries(snapshot).forEach(([key, value]) => {
       localStorage.setItem(key, value);
@@ -60,15 +79,9 @@ export const ClinicalAPI = {
     window.dispatchEvent(new Event('storage'));
   },
 
-  /**
-   * Simulated Cloud Vault for Email-Only Sync
-   */
   pushToCloud(email: string, payload: any) {
     const vault = JSON.parse(localStorage.getItem('medi_cloud_vault') || '{}');
-    vault[email.toLowerCase()] = {
-      ...payload,
-      lastSync: new Date().toISOString()
-    };
+    vault[email.toLowerCase()] = { ...payload, lastSync: new Date().toISOString() };
     localStorage.setItem('medi_cloud_vault', JSON.stringify(vault));
     clinicalBridge.postMessage({ type: 'CLOUD_PUSH', email });
     window.dispatchEvent(new Event('storage'));
@@ -81,7 +94,6 @@ export const ClinicalAPI = {
 
   seedDefaultData() {
     if (this.isConfigured()) return;
-
     const users = getLocalCollection<User>('registered_users');
     if (users.length === 0) {
       const defaultDoctors: User[] = [
@@ -92,7 +104,6 @@ export const ClinicalAPI = {
     }
   },
 
-  // --- AUTH OPERATIONS ---
   async signUp(email: string, pass: string, profile: User): Promise<User> {
     const users = getLocalCollection<User>('registered_users');
     if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) throw new Error("Email registered.");
@@ -105,10 +116,8 @@ export const ClinicalAPI = {
 
   async adminCreateUser(profile: User): Promise<User> {
     const users = getLocalCollection<User>('registered_users');
-    // Ensure uniqueness by email
-    const existing = users.find(u => u.email.toLowerCase() === profile.email.toLowerCase());
+    const existing = users.find(u => u.id === profile.id || u.email.toLowerCase() === profile.email.toLowerCase());
     if (existing) return existing;
-
     const newUser = { ...profile, id: profile.id || Math.random().toString(36).substr(2, 9), isApproved: true };
     users.push(newUser);
     saveLocalCollection('registered_users', users);
@@ -128,13 +137,15 @@ export const ClinicalAPI = {
     clinicalBridge.postMessage({ type: 'SIGN_OUT' });
   },
 
-  // --- PROFILE OPERATIONS ---
   async getProfile(userId: string): Promise<User | null> {
     return getLocalCollection<User>('registered_users').find(u => u.id === userId) || null;
   },
 
   async getAllUsers(): Promise<User[]> {
-    return getLocalCollection<User>('registered_users');
+    const users = getLocalCollection<User>('registered_users');
+    const uniqueMap = new Map();
+    users.forEach(u => uniqueMap.set(u.id, u));
+    return Array.from(uniqueMap.values());
   },
 
   async saveProfile(user: User): Promise<void> {
@@ -153,13 +164,10 @@ export const ClinicalAPI = {
     }
   },
 
-  // --- SYNC OPERATIONS ---
-  // Added getSyncRequests to resolve error in AdminDashboard line 45
   async getSyncRequests(): Promise<SyncRequest[]> {
     return getLocalCollection<SyncRequest>('sync_requests');
   },
 
-  // Added updateSyncRequestStatus to resolve error in AdminDashboard line 93
   async updateSyncRequestStatus(requestId: string, status: 'approved' | 'rejected'): Promise<void> {
     const syncs = getLocalCollection<SyncRequest>('sync_requests');
     const idx = syncs.findIndex(r => r.id === requestId);
