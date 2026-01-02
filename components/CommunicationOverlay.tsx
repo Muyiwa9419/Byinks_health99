@@ -27,17 +27,21 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   const [inputText, setInputText] = useState('');
   const [relayStatus, setRelayStatus] = useState<'connecting' | 'active' | 'unavailable'>('connecting');
   const [isExpired, setIsExpired] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatId = [currentUser.id, targetUser.id].sort().join('--');
   const storageKey = `chat_${chatId}`;
 
-  const EXPIRATION_THRESHOLD = 24 * 60 * 60 * 1000;
+  // Clinical Protocol: 10 Minute Inactivity Auto-Lock
+  const EXPIRATION_THRESHOLD = 10 * 60 * 1000; 
+  const WARNING_THRESHOLD = 2 * 60 * 1000;
 
-  const checkExpiration = (msgs: Message[]) => {
-    if (msgs.length === 0) return false;
+  const getRemainingTime = (msgs: Message[]) => {
+    if (msgs.length === 0) return EXPIRATION_THRESHOLD;
     const lastMsg = msgs[msgs.length - 1];
-    return (Date.now() - lastMsg.timestamp > EXPIRATION_THRESHOLD);
+    const elapsed = Date.now() - lastMsg.timestamp;
+    return Math.max(0, EXPIRATION_THRESHOLD - elapsed);
   };
 
   useEffect(() => {
@@ -46,18 +50,22 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     // 1. Initial Load
     const initialMsgs = JSON.parse(localStorage.getItem(storageKey) || '[]');
     setMessages(initialMsgs);
-    setIsExpired(checkExpiration(initialMsgs));
+    const initialRemaining = getRemainingTime(initialMsgs);
+    setTimeLeft(initialRemaining);
+    setIsExpired(initialRemaining <= 0);
 
     // 2. Setup Cloud Relay (Supabase Realtime)
+    let channel: any = null;
     if (!ClinicalAPI.isConfigured()) {
       setRelayStatus('unavailable');
     } else {
-      const channel = ClinicalAPI.subscribeToClinicalCloud(chatId, (incomingMsg: Message) => {
+      channel = ClinicalAPI.subscribeToClinicalCloud(chatId, (incomingMsg: Message) => {
         setMessages(prev => {
           if (prev.find(m => m.id === incomingMsg.id)) return prev;
           const newSet = [...prev, incomingMsg].sort((a, b) => a.timestamp - b.timestamp);
           localStorage.setItem(storageKey, JSON.stringify(newSet));
-          setIsExpired(checkExpiration(newSet));
+          setTimeLeft(EXPIRATION_THRESHOLD); // Reset local timer on incoming message
+          setIsExpired(false);
           return newSet;
         });
       });
@@ -71,14 +79,34 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     const handleStorageChange = () => {
       const updated = JSON.parse(localStorage.getItem(storageKey) || '[]');
       setMessages(updated);
-      setIsExpired(checkExpiration(updated));
+      const remaining = getRemainingTime(updated);
+      setTimeLeft(remaining);
+      setIsExpired(remaining <= 0);
     };
 
     window.addEventListener('storage', handleStorageChange);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
+      channel?.unsubscribe();
     };
   }, [isOpen, chatId, storageKey]);
+
+  // Activity Monitor Timer
+  useEffect(() => {
+    if (!isOpen || isExpired || timeLeft === null) return;
+
+    const ticker = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev === null || prev <= 0) {
+          setIsExpired(true);
+          return 0;
+        }
+        return prev - 1000;
+      });
+    }, 1000);
+
+    return () => clearInterval(ticker);
+  }, [isOpen, isExpired, timeLeft]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -102,11 +130,20 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
     window.dispatchEvent(new Event('storage'));
     
+    // Reset Timer locally
+    setTimeLeft(EXPIRATION_THRESHOLD);
+    setIsExpired(false);
+    
     // Broadcast to Relay (Cross-Device)
     await ClinicalAPI.broadcastMessage(chatId, newMessage);
     
     setInputText('');
-    setIsExpired(checkExpiration(updatedMessages));
+  };
+
+  const formatTimeLeft = (ms: number) => {
+    const mins = Math.floor(ms / 60000);
+    const secs = Math.floor((ms % 60000) / 1000);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (!isOpen) return null;
@@ -136,10 +173,12 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                   {relayStatus === 'active' ? 'Cross-Device Relay Active' : 
                    relayStatus === 'connecting' ? 'Opening Bridge...' : 'Local Tab-Only Mode'}
                 </div>
-                {relayStatus === 'unavailable' && (
-                  <span className="text-[8px] font-bold text-slate-400 border border-slate-200 px-2 py-0.5 rounded uppercase">
-                    Requires API Keys for PC-to-Tablet Sync
-                  </span>
+                {timeLeft !== null && !isExpired && (
+                  <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest flex items-center ${
+                    timeLeft < WARNING_THRESHOLD ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-slate-50 text-slate-400 border border-slate-100'
+                  }`}>
+                    Session Lock: {formatTimeLeft(timeLeft)}
+                  </div>
                 )}
               </div>
             </div>
@@ -148,6 +187,18 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
+
+        {/* Security Banners */}
+        {timeLeft !== null && timeLeft < WARNING_THRESHOLD && !isExpired && (
+          <div className="bg-amber-500 text-white px-8 py-3 text-center text-[10px] font-black uppercase tracking-widest animate-in slide-in-from-top-full">
+            Security Warning: Session will lock in {formatTimeLeft(timeLeft)} due to clinical inactivity.
+          </div>
+        )}
+        {isExpired && (
+          <div className="bg-red-600 text-white px-8 py-3 text-center text-[10px] font-black uppercase tracking-widest animate-in slide-in-from-top-full">
+            Clinical Hazard: This session has been locked for your protection. Please refresh to authorize a new session.
+          </div>
+        )}
 
         {/* Message Stream */}
         <div className="flex-grow overflow-y-auto p-8 space-y-8 custom-scrollbar bg-slate-50/20">
@@ -166,6 +217,17 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
               </div>
             </div>
           ))}
+          {isExpired && (
+            <div className="flex justify-center py-10">
+              <div className="bg-white border-2 border-red-100 p-8 rounded-[2rem] text-center max-w-sm shadow-xl">
+                 <div className="w-12 h-12 bg-red-50 text-red-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 15v2m0 0v2m0-2h2m-2 0H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                 </div>
+                 <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-2">Session Expired</h4>
+                 <p className="text-[10px] text-slate-500 font-bold leading-relaxed">To ensure medical confidentiality, this interaction hub has been locked due to 10 minutes of inactivity.</p>
+              </div>
+            </div>
+          )}
           <div ref={chatEndRef} />
         </div>
 
