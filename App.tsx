@@ -12,7 +12,7 @@ import FindDoctor from './pages/FindDoctor.tsx';
 import Services from './pages/Services.tsx';
 import Contact from './pages/Contact.tsx';
 import Navbar from './components/Navbar.tsx';
-import { ClinicalAPI } from './services/apiService.ts';
+import { ClinicalAPI, supabase } from './services/apiService.ts';
 
 const Toast: React.FC<{ notification: AppNotification; onClose: () => void }> = ({ notification, onClose }) => (
   <div className="fixed top-24 right-6 z-[300] w-80 bg-white rounded-[2rem] border-2 border-emerald-100 shadow-2xl p-6 animate-in slide-in-from-right-8 fade-in duration-500">
@@ -25,7 +25,7 @@ const Toast: React.FC<{ notification: AppNotification; onClose: () => void }> = 
     <p className="text-xs text-slate-700 font-medium leading-relaxed">{notification.message}</p>
     <div className="mt-4 flex items-center text-[8px] font-black text-slate-300 uppercase tracking-widest">
       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-2"></span>
-      Just Now • MediSphere Secure Signal
+      Real-time Cloud Signal
     </div>
   </div>
 );
@@ -40,7 +40,7 @@ const PendingApproval: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
       </div>
       <h2 className="text-2xl font-bold text-slate-900 mb-4">Verification Pending</h2>
       <p className="text-slate-600 mb-8 leading-relaxed">
-        Your clinical account is currently being reviewed by the Byinks Health administrative board. This usually takes 12-24 hours for credential verification.
+        Your clinical account is being reviewed. Our team usually verifies credentials within 12-24 hours.
       </p>
       <button onClick={onLogout} className="text-emerald-600 font-black text-sm uppercase tracking-widest hover:underline">Sign out and return later</button>
     </div>
@@ -49,50 +49,79 @@ const PendingApproval: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('medi_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
+    // 1. Initial Session Check
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const profile = await ClinicalAPI.getProfile(session.user.id);
+        setUser(profile);
+      }
+      setLoading(false);
+    };
+
+    checkSession();
+
+    // 2. Listen for Auth Changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session) {
+        const profile = await ClinicalAPI.getProfile(session.user.id);
+        setUser(profile);
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    const handleStorageChange = async () => {
-      if (!user) return;
-      const userNotifs = await ClinicalAPI.getNotifications(user.id);
-      if (userNotifs.length > 0) {
-        const latest = userNotifs[userNotifs.length - 1];
-        const isRecent = new Date().getTime() - new Date(latest.timestamp).getTime() < 5000;
-        if (isRecent && !latest.isRead) {
-          setActiveToast(latest);
-          const timer = setTimeout(() => setActiveToast(null), 8000);
-          return () => clearTimeout(timer);
-        }
-      }
-    };
+    if (!user) return;
 
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    // 3. Set up Real-time Notification Subscription
+    const channel = supabase
+      .channel(`user-notifications-${user.id}`)
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'notifications', 
+        filter: `user_id=eq.${user.id}` 
+      }, (payload) => {
+        const newNotif = payload.new as AppNotification;
+        setActiveToast(newNotif);
+        setTimeout(() => setActiveToast(null), 8000);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const handleLogin = (u: User) => {
     setUser(u);
-    localStorage.setItem('medi_user', JSON.stringify(u));
-    ClinicalAPI.saveUser(u);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
-    localStorage.removeItem('medi_user');
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
     setUser(updatedUser);
-    localStorage.setItem('medi_user', JSON.stringify(updatedUser));
-    await ClinicalAPI.saveUser(updatedUser);
+    await ClinicalAPI.saveProfile(updatedUser);
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
     <Router>
