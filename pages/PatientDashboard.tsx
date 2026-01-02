@@ -91,28 +91,22 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
     
     // Simulate push then pull
     setTimeout(() => {
-      const payload = {
-        appointments: JSON.parse(localStorage.getItem('medi_appointments') || '[]').filter((a: any) => a.patientId === user.id),
-        notifications: JSON.parse(localStorage.getItem('medi_notifications') || '[]').filter((n: any) => n.userId === user.id),
-      };
-
-      // 1. Push local changes
-      ClinicalAPI.pushToCloud(user.email, payload);
+      // 1. Push EVERYTHING from current local state to cloud vault
+      const currentSnapshot = ClinicalAPI.getClinicalSnapshot();
+      ClinicalAPI.pushToCloud(user.email, currentSnapshot);
 
       // 2. Pull global changes (simulated merge)
       const cloudData = ClinicalAPI.pullFromCloud(syncEmailInput);
       
       if (cloudData && syncEmailInput.toLowerCase() !== user.email.toLowerCase()) {
         // Different identity restore logic
-        if (confirm(`Clinical Identity Alert: Restore records for ${syncEmailInput} and overwrite current session?`)) {
-           const currentApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
-           const mergedApps = [...currentApps, ...cloudData.appointments.filter((na: any) => !currentApps.find((ca: any) => ca.id === na.id))];
-           localStorage.setItem('medi_appointments', JSON.stringify(mergedApps));
-           alert("Session Overwritten: Clinical identity synchronized.");
+        if (confirm(`Clinical Identity Alert: Restore full clinical records and chat history for ${syncEmailInput} and overwrite current session?`)) {
+           ClinicalAPI.restoreClinicalSnapshot(cloudData);
+           alert("Session Overwritten: Clinical identity and chat history synchronized.");
            window.location.reload();
         }
       } else {
-        alert("Clinical Cloud Synchronized: Local and remote medical records are now uniform.");
+        alert("Clinical Cloud Synchronized: Local and remote medical records/chats are now uniform.");
       }
 
       setIsSyncing(false);

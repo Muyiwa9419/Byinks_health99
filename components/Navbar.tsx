@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, UserRole, AppNotification } from '../types.ts';
 import { ClinicalAPI } from '../services/apiService.ts';
 
@@ -46,17 +46,11 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
       return;
     }
     
-    const payload = {
-      users: localStorage.getItem('medi_registered_users'),
-      apps: localStorage.getItem('medi_appointments'),
-      trans: localStorage.getItem('medi_transactions'),
-      logs: localStorage.getItem('medi_audit_logs'),
-      avail: localStorage.getItem('medi_availability'),
-      notifs: localStorage.getItem('medi_notifications')
-    };
+    // Capture EVERYTHING (including chats)
+    const payload = ClinicalAPI.getClinicalSnapshot();
     
     ClinicalAPI.pushToCloud(user.email, payload);
-    alert(`Clinical snapshot for ${user.email} pushed to Byinks Cloud Vault.`);
+    alert(`Full Clinical Snapshot (including chats) for ${user.email} pushed to Byinks Cloud Vault.`);
   };
 
   const handleCloudRestore = () => {
@@ -77,14 +71,9 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
         return;
       }
 
-      if (data.users) localStorage.setItem('medi_registered_users', data.users);
-      if (data.apps) localStorage.setItem('medi_appointments', data.apps);
-      if (data.trans) localStorage.setItem('medi_transactions', data.trans);
-      if (data.logs) localStorage.setItem('medi_audit_logs', data.logs);
-      if (data.avail) localStorage.setItem('medi_availability', data.avail);
-      if (data.notifs) localStorage.setItem('medi_notifications', data.notifs);
+      ClinicalAPI.restoreClinicalSnapshot(data);
 
-      alert(`Synchronization Successful! Records for ${syncEmail} restored. System is refreshing to update clinical records.`);
+      alert(`Synchronization Successful! All records and chat history for ${syncEmail} restored. System is refreshing to update clinical records.`);
       setIsSyncOpen(false);
       setIsSyncing(false);
       window.location.reload(); 
@@ -103,6 +92,12 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
 
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
   const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  const handleMobileLogout = () => {
+    onLogout();
+    navigate('/');
+    closeMobileMenu();
+  };
 
   return (
     <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
@@ -164,11 +159,14 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
             <Link to="/find-doctor" onClick={closeMobileMenu} className="block text-xs font-black uppercase tracking-widest text-slate-900">Doctors</Link>
             <Link to="/services" onClick={closeMobileMenu} className="block text-xs font-black uppercase tracking-widest text-slate-900">Services</Link>
             <button onClick={() => { setIsSyncOpen(true); closeMobileMenu(); }} className="block text-xs font-black uppercase tracking-widest text-emerald-600">Cloud Sync</button>
-            <div className="pt-6 border-t border-slate-50">
+            <div className="pt-6 border-t border-slate-50 space-y-4">
               {user ? (
-                <Link to="/dashboard" onClick={closeMobileMenu} className="block w-full py-4 bg-slate-900 text-white text-center rounded-2xl text-[10px] font-black uppercase tracking-widest">Dashboard</Link>
+                <>
+                  <Link to="/dashboard" onClick={closeMobileMenu} className="block w-full py-4 bg-slate-900 text-white text-center rounded-2xl text-[10px] font-black uppercase tracking-widest transition active:scale-95">Dashboard</Link>
+                  <button onClick={handleMobileLogout} className="block w-full py-4 bg-red-50 text-red-600 border border-red-100 text-center rounded-2xl text-[10px] font-black uppercase tracking-widest transition active:scale-95">Sign Out</button>
+                </>
               ) : (
-                <Link to="/login" onClick={closeMobileMenu} className="block w-full py-4 bg-emerald-600 text-white text-center rounded-2xl text-[10px] font-black uppercase tracking-widest">Portal Access</Link>
+                <Link to="/login" onClick={closeMobileMenu} className="block w-full py-4 bg-emerald-600 text-white text-center rounded-2xl text-[10px] font-black uppercase tracking-widest transition active:scale-95">Portal Access</Link>
               )}
             </div>
           </div>

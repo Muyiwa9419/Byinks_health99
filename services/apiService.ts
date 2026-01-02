@@ -18,13 +18,36 @@ export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
 const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getItem(`medi_${key}`) || '[]');
 const saveLocalCollection = <T>(key: string, data: T[]) => {
   localStorage.setItem(`medi_${key}`, JSON.stringify(data));
-  // Forces all active tabs and components to refresh their local state
   window.dispatchEvent(new Event('storage'));
 };
 
 export const ClinicalAPI = {
   isConfigured(): boolean {
     return !!supabase;
+  },
+
+  /**
+   * Scans local storage for all clinical data including chats
+   */
+  getClinicalSnapshot() {
+    const snapshot: Record<string, string> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('medi_') || key.startsWith('chat_'))) {
+        snapshot[key] = localStorage.getItem(key) || '';
+      }
+    }
+    return snapshot;
+  },
+
+  /**
+   * Restores a clinical snapshot into local storage
+   */
+  restoreClinicalSnapshot(snapshot: Record<string, string>) {
+    Object.entries(snapshot).forEach(([key, value]) => {
+      localStorage.setItem(key, value);
+    });
+    window.dispatchEvent(new Event('storage'));
   },
 
   /**
