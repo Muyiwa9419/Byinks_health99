@@ -26,16 +26,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isOnboardOpen, setIsOnboardOpen] = useState(false);
+
+  // Onboarding Form State
+  const [onboardForm, setOnboardForm] = useState({
+    name: '',
+    email: '',
+    role: UserRole.CONSULTANT,
+    specialty: ''
+  });
 
   const fetchData = async () => {
     setLoading(true);
     const users = await ClinicalAPI.getAllUsers();
     
-    // In hybrid mode, we might need to sync stats differently
     const totalPatients = users.filter(u => u.role === UserRole.PATIENT).length;
     const activeConsultants = users.filter(u => u.role === UserRole.CONSULTANT && u.isApproved).length;
     
-    // We'll use local stats for things not in profile
     const storedApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
     const storedTrans: Transaction[] = JSON.parse(localStorage.getItem('medi_transactions') || '[]');
     const storedLogs: AuditLog[] = JSON.parse(localStorage.getItem('medi_audit_logs') || '[]');
@@ -65,7 +72,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     try {
       await ClinicalAPI.updateUserStatus(userId, { role: newRole });
       fetchData();
-      alert(`User role updated to ${newRole}`);
     } catch (e) {
       alert("Failed to update user role.");
     }
@@ -75,9 +81,30 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     try {
       await ClinicalAPI.updateUserStatus(userId, { isApproved: true });
       fetchData();
-      alert("Consultant credentials verified and approved.");
     } catch (e) {
       alert("Failed to approve consultant.");
+    }
+  };
+
+  const handleOnboardSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const newUser: User = {
+        id: '', // API handles generation
+        name: onboardForm.name,
+        email: onboardForm.email.toLowerCase(),
+        role: onboardForm.role,
+        specialty: onboardForm.role === UserRole.CONSULTANT ? onboardForm.specialty : undefined,
+        isApproved: true
+      };
+      
+      await ClinicalAPI.adminCreateUser(newUser);
+      setIsOnboardOpen(false);
+      setOnboardForm({ name: '', email: '', role: UserRole.CONSULTANT, specialty: '' });
+      fetchData();
+      alert("Account provisioned successfully.");
+    } catch (err: any) {
+      alert(err.message || "Failed to onboard clinical identity.");
     }
   };
 
@@ -89,6 +116,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           <p className="text-slate-500 font-bold mt-1 uppercase text-[10px] tracking-[0.2em]">Clinical Infrastructure Control</p>
         </div>
         <div className="flex space-x-4">
+          <button 
+            onClick={() => setIsOnboardOpen(true)}
+            className="px-6 py-4 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl flex items-center shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition"
+          >
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+            Onboard Identity
+          </button>
           <div className="px-6 py-4 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl flex items-center">
             <span className="w-2 h-2 bg-emerald-500 rounded-full mr-3 animate-pulse"></span>
             System Node Active
@@ -212,6 +246,73 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           </section>
         </div>
       </div>
+
+      {/* Onboarding Modal */}
+      {isOnboardOpen && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsOnboardOpen(false)}></div>
+          <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10">
+            <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Direct Clinical Onboarding</h3>
+            <form onSubmit={handleOnboardSubmit} className="space-y-6">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Legal Name</label>
+                <input 
+                  required
+                  placeholder="e.g. Dr. Ada Lovelace" 
+                  value={onboardForm.name}
+                  onChange={(e) => setOnboardForm({...onboardForm, name: e.target.value})}
+                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Clinical Identifier (Email)</label>
+                <input 
+                  required
+                  type="email"
+                  placeholder="staff@byinkshealth.com" 
+                  value={onboardForm.email}
+                  onChange={(e) => setOnboardForm({...onboardForm, email: e.target.value})}
+                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">System Role</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setOnboardForm({...onboardForm, role: UserRole.CONSULTANT})}
+                    className={`py-3 text-[10px] font-black rounded-xl transition uppercase tracking-widest ${onboardForm.role === UserRole.CONSULTANT ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}
+                  >
+                    Specialist
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setOnboardForm({...onboardForm, role: UserRole.ADMIN})}
+                    className={`py-3 text-[10px] font-black rounded-xl transition uppercase tracking-widest ${onboardForm.role === UserRole.ADMIN ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}
+                  >
+                    Administrator
+                  </button>
+                </div>
+              </div>
+              {onboardForm.role === UserRole.CONSULTANT && (
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Medical Specialty</label>
+                  <input 
+                    required
+                    placeholder="e.g. Cardiology" 
+                    value={onboardForm.specialty}
+                    onChange={(e) => setOnboardForm({...onboardForm, specialty: e.target.value})}
+                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" 
+                  />
+                </div>
+              )}
+              <button type="submit" className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition shadow-xl shadow-emerald-100">
+                Authorize System Entry
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

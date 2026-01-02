@@ -50,7 +50,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
     const token = btoa(JSON.stringify(data));
     setSyncToken(token);
     navigator.clipboard.writeText(token);
-    alert("Byinks Cloud Token copied! Paste this on your other device's Login screen to sync.");
+    alert("Byinks Cloud Token copied! Paste this on your other device's Sync Hub to replicate your medical ecosystem.");
   };
 
   const handleImport = () => {
@@ -61,7 +61,6 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
       }
       const data = JSON.parse(atob(syncToken));
       
-      // Update each collection
       if (data.users) localStorage.setItem('medi_registered_users', data.users);
       if (data.apps) localStorage.setItem('medi_appointments', data.apps);
       if (data.trans) localStorage.setItem('medi_transactions', data.trans);
@@ -69,11 +68,21 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
       if (data.avail) localStorage.setItem('medi_availability', data.avail);
       if (data.notifs) localStorage.setItem('medi_notifications', data.notifs);
 
-      alert("Synchronization Successful. The Clinical Hub will now refresh.");
+      alert("Clinical Synchronization Successful. Refreshing Clinical Hub...");
       setIsSyncOpen(false);
-      window.location.reload(); // Force refresh to re-initialize state from new storage
+      window.location.reload(); 
     } catch (e) {
       alert("Synchronization Error: The provided token is invalid or corrupted.");
+    }
+  };
+
+  const clearStorage = () => {
+    if (confirm("Clinical Hazard: This will permanently delete all local hospital records. Proceed?")) {
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('medi_') || key.startsWith('chat_')) localStorage.removeItem(key);
+      });
+      alert("Local Infrastructure Purged.");
+      window.location.reload();
     }
   };
 
@@ -98,7 +107,6 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
             </Link>
           </div>
           
-          {/* Desktop Nav */}
           <div className="hidden md:flex items-center space-x-8">
             <div className="flex space-x-8 text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">
               <Link to="/find-doctor" className={`${location.pathname === '/find-doctor' ? 'text-emerald-600' : 'hover:text-emerald-600'} transition`}>Doctors</Link>
@@ -111,11 +119,10 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
                 <div className="flex items-center space-x-4">
                   <button 
                     onClick={() => setIsSyncOpen(true)}
-                    className="p-3 bg-slate-50 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-2xl transition group relative"
+                    className="p-3 bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white rounded-2xl transition group relative shadow-inner"
                     title="Cloud Sync Mobility Hub"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" /></svg>
-                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
                   </button>
 
                   <div className="relative" ref={notifRef}>
@@ -155,16 +162,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
             </div>
           </div>
 
-          {/* Mobile Toggle */}
           <div className="md:hidden flex items-center space-x-4">
-            {user && (
-               <div className="relative">
-                 <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                 {unreadCount > 0 && (
-                    <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full"></span>
-                 )}
-               </div>
-            )}
             <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="p-3 bg-slate-50 text-slate-900 rounded-2xl transition"
@@ -181,85 +179,50 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
         </div>
       </div>
 
-      {/* Mobile Menu Drawer */}
-      {isMobileMenuOpen && (
-        <div className="md:hidden absolute top-full left-0 right-0 bg-white border-t border-slate-50 shadow-2xl animate-in slide-in-from-top-4 duration-300">
-          <div className="p-8 space-y-8">
-            <div className="flex flex-col space-y-6 text-xs font-black uppercase tracking-[0.3em] text-slate-500">
-              <Link to="/find-doctor" onClick={closeMobileMenu} className="hover:text-emerald-600">Doctors</Link>
-              <Link to="/services" onClick={closeMobileMenu} className="hover:text-emerald-600">Clinical Services</Link>
-              <Link to="/contact" onClick={closeMobileMenu} className="hover:text-emerald-600">Support Center</Link>
-            </div>
-            
-            <div className="pt-8 border-t border-slate-50">
-              {user ? (
-                <div className="space-y-4">
-                  <Link 
-                    to="/dashboard" 
-                    onClick={closeMobileMenu}
-                    className="block w-full text-center py-5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl"
-                  >
-                    Go to Dashboard
-                  </Link>
-                  <button 
-                    onClick={() => { onLogout(); closeMobileMenu(); navigate('/'); }}
-                    className="w-full py-5 bg-red-50 text-red-600 border border-red-100 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center"
-                  >
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                    Terminate Session
-                  </button>
-                </div>
-              ) : (
-                <Link 
-                  to="/login" 
-                  onClick={closeMobileMenu}
-                  className="block w-full text-center py-5 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-emerald-100"
-                >
-                  Sign In to Portal
-                </Link>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Sync Mobility Hub Modal - PROVISION FOR PASTING TOKEN */}
       {isSyncOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsSyncOpen(false)}></div>
-          <div className="relative w-full max-w-lg bg-white rounded-[3rem] shadow-2xl p-10 overflow-hidden" ref={syncRef}>
+          <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10 overflow-hidden" ref={syncRef}>
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 blur-2xl opacity-50"></div>
             <h3 className="text-2xl font-black text-slate-900 mb-2 relative z-10">Global Clinical Sync</h3>
-            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8 relative z-10">Hybrid Infrastructure Tool</p>
+            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8 relative z-10">Cloud Mobility Toolkit</p>
             
             <div className="space-y-8 relative z-10">
               <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Device Export</h4>
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">Generate a secure clinical token to replicate this device's data to another terminal.</p>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Export Infrastructure</h4>
+                <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">Replicate this local ecosystem to another device.</p>
                 <button 
                   onClick={handleExport}
                   className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition"
                 >
-                  Generate & Copy Token
+                  Copy Secure Sync Token
                 </button>
               </div>
 
               <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Device Import</h4>
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">Paste the token from your other medical terminal below to synchronize records.</p>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Import Infrastructure</h4>
+                <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">Paste the Cloud Token from another terminal below.</p>
                 <textarea 
                   value={syncToken}
                   onChange={(e) => setSyncToken(e.target.value)}
-                  placeholder="Paste token here..."
+                  placeholder="Paste clinical token here..."
                   className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-[9px] font-mono outline-none focus:border-emerald-600 transition mb-4"
                 />
                 <button 
                   onClick={handleImport}
                   className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-600 transition shadow-xl"
                 >
-                  Authorize Import & Sync
+                  Authorize & Refresh Ecosystem
                 </button>
               </div>
+
+              {user?.role === UserRole.ADMIN && (
+                <div className="pt-4 border-t border-slate-100 text-center">
+                  <button onClick={clearStorage} className="text-red-500 text-[9px] font-black uppercase tracking-widest hover:underline">
+                    Clear Local Infrastructure Records
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

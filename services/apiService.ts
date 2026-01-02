@@ -47,6 +47,30 @@ export const ClinicalAPI = {
     }
   },
 
+  async adminCreateUser(profile: User): Promise<User> {
+    // In a real cloud app, this would use a service role or invite flow. 
+    // Here we simulate administrative account provisioning.
+    if (this.isConfigured()) {
+      // Create profile entry. Actual auth happens via invite in real Supabase apps.
+      const { error } = await supabase!.from('profiles').upsert({
+        id: profile.id || Math.random().toString(36).substr(2, 9),
+        name: profile.name,
+        email: profile.email,
+        role: profile.role,
+        specialty: profile.specialty,
+        is_approved: true, // Admin-created accounts are auto-approved
+      });
+      if (error) throw error;
+      return profile;
+    } else {
+      const users = getLocalCollection<User>('registered_users');
+      const newUser = { ...profile, id: profile.id || Math.random().toString(36).substr(2, 9), isApproved: true };
+      users.push(newUser);
+      saveLocalCollection('registered_users', users);
+      return newUser;
+    }
+  },
+
   async signIn(email: string, pass: string): Promise<User> {
     if (this.isConfigured()) {
       const { data, error } = await supabase!.auth.signInWithPassword({ email, password: pass });

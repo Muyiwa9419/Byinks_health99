@@ -112,14 +112,15 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   };
 
   const connectToGeminiLive = async (stream: MediaStream) => {
-    if (!process.env.API_KEY) {
-      console.warn("AI Scribe unavailable: Missing API Key.");
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      console.warn("AI Scribe unavailable: Missing API Credentials.");
       return;
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const inputCtx = new AudioContext({ sampleRate: 16000 });
+      const ai = new GoogleGenAI({ apiKey });
+      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       audioContextRef.current = inputCtx;
       
       const sessionPromise = ai.live.connect({
@@ -128,7 +129,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           responseModalities: [Modality.AUDIO],
           inputAudioTranscription: {}, 
           outputAudioTranscription: {}, 
-          systemInstruction: `You are a Clinical Scribe for Byinks Health. You are listening to a session between ${currentUser.name} and Dr. ${targetUser.name}. Transcribe the conversation and identify medical symptoms or concerns.`
+          systemInstruction: `You are a Clinical Scribe for Byinks Health. You are listening to a session between ${currentUser.name} and Dr. ${targetUser.name}. Transcribe the conversation accurately and identify medical symptoms, diagnostic observations, or specific patient concerns.`
         },
         callbacks: {
           onopen: () => {
@@ -146,7 +147,9 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
               const base64 = encode(pcmData);
               
               sessionPromise.then((session) => {
-                session.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } });
+                session.sendRealtimeInput({ 
+                  media: { data: base64, mimeType: 'audio/pcm;rate=16000' } 
+                });
               });
             };
             
@@ -155,33 +158,33 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           },
           onmessage: async (message: LiveServerMessage) => {
             if (message.serverContent?.outputTranscription) {
-              setTranscription(prev => (prev + '\nAI: ' + message.serverContent!.outputTranscription!.text).slice(-1500));
+              setTranscription(prev => (prev + '\nDr: ' + message.serverContent!.outputTranscription!.text).slice(-2000));
             } else if (message.serverContent?.inputTranscription) {
-              setTranscription(prev => (prev + '\nUser: ' + message.serverContent!.inputTranscription!.text).slice(-1500));
+              setTranscription(prev => (prev + '\nPatient: ' + message.serverContent!.inputTranscription!.text).slice(-2000));
             }
           },
-          onerror: (e) => console.error("Clinical AI Scribe Error:", e),
-          onclose: () => console.log("Clinical AI Scribe Disconnected")
+          onerror: (e) => console.error("Clinical AI Scribe Signal Lost:", e),
+          onclose: () => console.log("Clinical AI Scribe Terminated Session")
         }
       });
       sessionPromiseRef.current = sessionPromise;
     } catch (e) {
-      console.warn("Clinical AI failed to initialize.", e);
+      console.warn("Clinical AI failed to synchronize.", e);
     }
   };
 
   const syncAiInsights = async () => {
-    if (messages.length === 0) {
+    if (messages.length === 0 && !transcription) {
       alert("Awaiting more clinical data for synchronization.");
       return;
     }
     setIsAiLoading(true);
     try {
-      const historyStr = messages.map(m => `${m.senderName}: ${m.text}`).join('\n');
+      const historyStr = messages.map(m => `${m.senderName}: ${m.text}`).join('\n') + '\n' + transcription;
       const analysis = await summarizePatientHistory(historyStr);
       setAiAnalysis(analysis);
     } catch (err) {
-      setAiAnalysis("Clinical analysis failed to synchronize.");
+      setAiAnalysis("Clinical analysis failed to synchronize with the cloud.");
     } finally {
       setIsAiLoading(false);
     }
