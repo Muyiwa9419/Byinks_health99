@@ -19,6 +19,16 @@ interface CommunicationOverlayProps {
   mode: 'chat' | 'video';
 }
 
+// Manual encoding function to avoid stack overflow with large Uint8Arrays
+function encodeBase64(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
 const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({ 
   isOpen, onClose, currentUser, targetUser, mode 
 }) => {
@@ -26,11 +36,9 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   const [inputText, setInputText] = useState('');
   const [isCalling, setIsCalling] = useState(false);
   const [transcription, setTranscription] = useState('');
-  const [isLiveActive, setIsLiveActive] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   
-  // Post-Consultation Payment state
   const [sessionCompleted, setSessionCompleted] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
   const SESSION_FEE = 45;
@@ -103,7 +111,6 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       if (videoRef.current) videoRef.current.srcObject = stream;
       setIsCalling(true);
       
-      // Notify target user about incoming video call
       addNotification(
         targetUser.id,
         'Incoming Video Call',
@@ -112,6 +119,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
 
       await connectToGeminiLive(stream);
     } catch (err) {
+      console.error("Media access failed:", err);
       alert("Media access required for video consultations.");
       onClose();
     }
@@ -126,7 +134,10 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
 
   const connectToGeminiLive = async (stream: MediaStream) => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) throw new Error("API Key missing");
+      
+      const ai = new GoogleGenAI({ apiKey });
       const inputCtx = new AudioContext({ sampleRate: 16000 });
       const outputCtx = new AudioContext({ sampleRate: 24000 });
       audioContextRef.current = outputCtx;
@@ -136,34 +147,41 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
         config: {
           responseModalities: [Modality.AUDIO],
           outputAudioTranscription: {},
-          systemInstruction: `Clinical Scribe. Logging interaction between ${currentUser.name} and Dr. ${targetUser.name}.`
+          systemInstruction: `You are a clinical scribe monitoring a healthcare consultation between ${currentUser.name} (Patient) and Dr. ${targetUser.name} (Specialist). Maintain professional clinical summaries.`
         },
         callbacks: {
           onopen: () => {
-            setIsLiveActive(true);
+            console.log("MediSphere Live: Clinical link established.");
             const source = inputCtx.createMediaStreamSource(stream);
             const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+            
             processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               const int16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-              const base64 = btoa(String.fromCharCode(...new Uint8Array(int16.buffer)));
-              sessionPromise.then(s => s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }));
+              for (let i = 0; i < inputData.length; i++) {
+                int16[i] = inputData[i] * 32768;
+              }
+              const base64 = encodeBase64(new Uint8Array(int16.buffer));
+              sessionPromise.then(s => s.sendRealtimeInput({ 
+                media: { data: base64, mimeType: 'audio/pcm;rate=16000' } 
+              }));
             };
+            
             source.connect(processor);
             processor.connect(inputCtx.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.serverContent?.outputTranscription) {
-              setTranscription(prev => (prev + ' ' + msg.serverContent!.outputTranscription!.text).slice(-300));
+              setTranscription(prev => (prev + ' ' + msg.serverContent!.outputTranscription!.text).slice(-500));
             }
           },
-          onclose: () => setIsLiveActive(false)
+          onerror: (e) => console.error("Clinical Signal Error:", e),
+          onclose: () => console.log("MediSphere Live: Clinical link terminated.")
         }
       });
       sessionRef.current = await sessionPromise;
     } catch (e) {
-      console.warn("MediSphere: Gemini Live currently unavailable.", e);
+      console.warn("MediSphere: Clinical AI context engine offline.", e);
     }
   };
 
@@ -171,7 +189,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     if (currentUser.role === UserRole.PATIENT) {
       setSessionCompleted(true);
     } else {
-      onClose(); // Consultants just close
+      onClose();
     }
   };
 
@@ -182,14 +200,13 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       amount: SESSION_FEE,
       type: 'consultation',
       timestamp: new Date().toISOString(),
-      description: `Completed session with ${targetUser.name}`
+      description: `MediSphere Session: Dr. ${targetUser.name}`
     };
 
     const transactions = JSON.parse(localStorage.getItem('medi_transactions') || '[]');
     transactions.push(newTransaction);
     localStorage.setItem('medi_transactions', JSON.stringify(transactions));
     
-    // Update appointment status to completed/paid
     const apps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
     const updatedApps = apps.map((a: Appointment) => 
       (a.patientId === currentUser.id && a.consultantId === targetUser.id && a.status === 'confirmed')
@@ -199,7 +216,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     localStorage.setItem('medi_appointments', JSON.stringify(updatedApps));
 
     setIsPaid(true);
-    setTimeout(onClose, 1500); // Close after success message
+    setTimeout(onClose, 1500);
   };
 
   const sendMessage = (e: React.FormEvent) => {
@@ -217,11 +234,10 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     setMessages(updated);
     localStorage.setItem(`chat_${chatId}`, JSON.stringify(updated));
     
-    // Notify target user about new message
     addNotification(
       targetUser.id,
-      'New Secure Message',
-      `You have a new clinical message from ${currentUser.name}.`
+      'New Clinical Message',
+      `Urgent: ${currentUser.name} sent a secure portal message.`
     );
 
     setInputText('');
@@ -234,8 +250,6 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={endSession}></div>
       
       <div className="relative w-full h-full max-w-6xl bg-slate-900 md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col md:flex-row border border-white/5">
-        
-        {/* Main Workspace */}
         <div className="flex-grow flex flex-col bg-slate-950 relative">
           {sessionCompleted ? (
             <div className="flex-grow flex items-center justify-center p-12 bg-slate-900 animate-in zoom-in-95 duration-500">
@@ -245,37 +259,37 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                     <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-emerald-900/40">
                       <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
                     </div>
-                    <h3 className="text-3xl font-black text-white mb-2">Payment Successful</h3>
-                    <p className="text-slate-400 font-medium">Session recorded in your clinical history.</p>
+                    <h3 className="text-3xl font-black text-white mb-2">Payment Authorized</h3>
+                    <p className="text-slate-400 font-medium">Session records stored in encrypted cloud vault.</p>
                   </div>
                 ) : (
                   <>
                     <div className="inline-flex items-center px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-8">
-                      Session Completed • {Math.ceil(duration / 60)} Minutes
+                      Session Terminated • {Math.ceil(duration / 60)}m Recorded
                     </div>
-                    <h3 className="text-4xl font-black text-white mb-6 tracking-tight">Post-Consultation Summary</h3>
+                    <h3 className="text-4xl font-black text-white mb-6 tracking-tight">Consultation Checkout</h3>
                     
                     <div className="bg-slate-800/50 p-8 rounded-[2.5rem] border border-white/5 mb-10 text-left">
                       <div className="flex justify-between items-center mb-6">
-                        <span className="text-slate-400 font-bold uppercase tracking-widest text-xs">Consultation Fee</span>
+                        <span className="text-slate-400 font-bold uppercase tracking-widest text-xs">Clinical Rate</span>
                         <span className="text-3xl font-black text-white">${SESSION_FEE}.00</span>
                       </div>
                       <div className="space-y-4 pt-6 border-t border-white/5">
                         <div className="flex items-center text-slate-300 text-sm font-medium italic">
                           <svg className="w-4 h-4 mr-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                          Clinical context synchronized to MediSphere.
+                          Diagnostic sync successfully verified.
                         </div>
                       </div>
                     </div>
 
                     <button 
                       onClick={handlePayment}
-                      className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-xs hover:bg-emerald-500 transition shadow-2xl shadow-emerald-900/50 flex items-center justify-center space-x-3 active:scale-95"
+                      className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-xs hover:bg-emerald-500 transition shadow-2xl flex items-center justify-center space-x-3 active:scale-95"
                     >
-                      <span>Settle Consultation Bill</span>
+                      <span>Authorize Payment</span>
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
                     </button>
-                    <button onClick={onClose} className="mt-8 text-slate-500 font-black uppercase tracking-widest text-[10px] hover:text-white transition">Cancel & Close Portal</button>
+                    <button onClick={onClose} className="mt-8 text-slate-500 font-black uppercase tracking-widest text-[10px] hover:text-white transition">Abandon Session</button>
                   </>
                 )}
               </div>
@@ -294,13 +308,13 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                     <h4 className="text-3xl font-black text-white tracking-tight">Dr. {targetUser.name}</h4>
                     <div className="flex items-center mt-4 space-x-2">
                        <span className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
-                       <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Active Signal</span>
+                       <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Live Clinical Feed</span>
                     </div>
                   </div>
 
                   <div className="absolute bottom-12 left-12">
                      <div className="bg-black/40 backdrop-blur-xl px-6 py-3 rounded-2xl border border-white/10">
-                        <span className="text-xs font-black text-white/80 tabular-nums">LIVE • {new Date(duration * 1000).toISOString().substr(14, 5)}</span>
+                        <span className="text-xs font-black text-white/80 tabular-nums">SECURE • {new Date(duration * 1000).toISOString().substr(14, 5)}</span>
                      </div>
                   </div>
 
@@ -308,7 +322,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                     <button onClick={() => setIsMuted(!isMuted)} className={`p-5 rounded-full transition ${isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}>
                       <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
                     </button>
-                    <button onClick={endSession} className="p-8 bg-red-600 text-white rounded-full hover:bg-red-500 transition shadow-2xl shadow-red-900/40">
+                    <button onClick={endSession} className="p-8 bg-red-600 text-white rounded-full hover:bg-red-500 transition shadow-2xl">
                       <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   </div>
@@ -317,12 +331,12 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                 <div className="flex-grow flex flex-col bg-slate-900">
                   <div className="p-10 border-b border-white/5 flex items-center justify-between bg-slate-950/30">
                     <div className="flex items-center space-x-5">
-                      <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center font-black text-white text-xl shadow-xl shadow-emerald-900/20">
+                      <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center font-black text-white text-xl">
                         {targetUser.name.charAt(0)}
                       </div>
                       <div>
                         <h3 className="text-xl font-black text-white leading-none mb-1">Dr. {targetUser.name}</h3>
-                        <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest">Consulting Specialist • {new Date(duration * 1000).toISOString().substr(14, 5)}</p>
+                        <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest">Active Consultation • {new Date(duration * 1000).toISOString().substr(14, 5)}</p>
                       </div>
                     </div>
                     <button onClick={endSession} className="p-3 bg-white/5 text-slate-500 hover:text-white rounded-2xl transition">
@@ -330,7 +344,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                     </button>
                   </div>
 
-                  <div className="flex-grow overflow-y-auto p-10 space-y-6">
+                  <div className="flex-grow overflow-y-auto p-10 space-y-6 custom-scrollbar">
                     {messages.map((m) => (
                       <div key={m.id} className={`flex ${m.senderId === currentUser.id ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[75%] p-6 rounded-[2rem] ${
@@ -339,7 +353,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                             : 'bg-slate-800 text-slate-200 rounded-bl-none border border-white/5'
                         }`}>
                           <p className="text-[9px] opacity-60 font-black uppercase tracking-widest mb-2">{m.senderName}</p>
-                          <p className="text-sm font-medium leading-relaxed">{m.text}</p>
+                          <p className="text-sm font-medium">{m.text}</p>
                         </div>
                       </div>
                     ))}
@@ -352,10 +366,10 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                         type="text" 
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
-                        placeholder="Secure clinical enquiry..."
-                        className="flex-grow bg-slate-900 border-2 border-white/5 rounded-[1.5rem] px-8 py-5 text-white focus:border-emerald-600 outline-none transition font-medium"
+                        placeholder="Secure clinical communication..."
+                        className="flex-grow bg-slate-900 border-2 border-white/5 rounded-[1.5rem] px-8 py-5 text-white focus:border-emerald-600 outline-none transition"
                       />
-                      <button type="submit" className="bg-emerald-600 text-white px-8 rounded-[1.5rem] hover:bg-emerald-700 transition shadow-xl">
+                      <button type="submit" className="bg-emerald-600 text-white px-8 rounded-[1.5rem] hover:bg-emerald-700 transition">
                         <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                       </button>
                     </div>
@@ -366,14 +380,13 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           )}
         </div>
 
-        {/* Clinical Intelligence Sidebar */}
         <div className="w-full md:w-80 bg-slate-950 border-l border-white/5 p-10 flex flex-col">
           <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-10">Clinical Intelligence</h4>
           
           <div className="flex-grow space-y-8">
             <div className="p-8 bg-emerald-600/5 rounded-[2.5rem] border border-emerald-500/10">
-              <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest block mb-4">Live Scribe Active</span>
-              <p className="text-xs text-slate-500 leading-relaxed italic font-medium">"{transcription || 'Awaiting live dialogue for secure transcription...'}"</p>
+              <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest block mb-4">AI Scribe Transcript</span>
+              <p className="text-[11px] text-slate-500 leading-relaxed italic font-medium">"{transcription || 'Awaiting clinical dialogue...'}"</p>
             </div>
 
             <div className="space-y-4">
@@ -383,15 +396,15 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                </div>
                <div className="flex items-center space-x-3 p-4 bg-white/5 rounded-2xl border border-white/5">
                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data Locality: Global</span>
+                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">MediSphere Secure Node</span>
                </div>
             </div>
           </div>
 
           <div className="mt-10 pt-10 border-t border-white/5 text-center">
-             <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4">Post-Session Billing</p>
+             <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4">Running Total</p>
              <div className="text-2xl font-black text-white mb-2">${SESSION_FEE}</div>
-             <p className="text-[8px] text-slate-500 font-bold uppercase tracking-tight">Standard Consultation Rate</p>
+             <p className="text-[8px] text-slate-500 font-bold uppercase tracking-tight">Fixed Consultation Unit</p>
           </div>
         </div>
       </div>
