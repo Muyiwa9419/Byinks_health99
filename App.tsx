@@ -25,7 +25,7 @@ const Toast: React.FC<{ notification: AppNotification; onClose: () => void }> = 
     <p className="text-xs text-slate-700 font-medium leading-relaxed">{notification.message}</p>
     <div className="mt-4 flex items-center text-[8px] font-black text-slate-300 uppercase tracking-widest">
       <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-2"></span>
-      Real-time Cloud Signal
+      Session Event Recorded
     </div>
   </div>
 );
@@ -53,60 +53,49 @@ const App: React.FC = () => {
   const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
 
   useEffect(() => {
-    // 1. Initial Session Check
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const profile = await ClinicalAPI.getProfile(session.user.id);
-        setUser(profile);
+      try {
+        if (ClinicalAPI.isConfigured()) {
+          const { data: { session } } = await supabase!.auth.getSession();
+          if (session) {
+            const profile = await ClinicalAPI.getProfile(session.user.id);
+            setUser(profile);
+          }
+        } else {
+          const saved = localStorage.getItem('medi_local_session');
+          if (saved) setUser(JSON.parse(saved));
+        }
+      } catch (e) {
+        console.error("Session recovery failed:", e);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     checkSession();
 
-    // 2. Listen for Auth Changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session) {
-        const profile = await ClinicalAPI.getProfile(session.user.id);
-        setUser(profile);
-      } else {
-        setUser(null);
-      }
-    });
+    let subscription: any = null;
+    if (ClinicalAPI.isConfigured()) {
+      const { data } = supabase!.auth.onAuthStateChange(async (event, session) => {
+        if (session) {
+          const profile = await ClinicalAPI.getProfile(session.user.id);
+          setUser(profile);
+        } else {
+          setUser(null);
+        }
+      });
+      subscription = data.subscription;
+    }
 
-    return () => subscription.unsubscribe();
+    return () => subscription?.unsubscribe();
   }, []);
-
-  useEffect(() => {
-    if (!user) return;
-
-    // 3. Set up Real-time Notification Subscription
-    const channel = supabase
-      .channel(`user-notifications-${user.id}`)
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'notifications', 
-        filter: `user_id=eq.${user.id}` 
-      }, (payload) => {
-        const newNotif = payload.new as AppNotification;
-        setActiveToast(newNotif);
-        setTimeout(() => setActiveToast(null), 8000);
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user]);
 
   const handleLogin = (u: User) => {
     setUser(u);
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await ClinicalAPI.signOut();
     setUser(null);
   };
 
@@ -145,7 +134,8 @@ const App: React.FC = () => {
                 user.role === UserRole.CONSULTANT ? (
                   user.isApproved ? <ConsultantDashboard user={user} /> : <PendingApproval onLogout={handleLogout} />
                 ) :
-                <AdminDashboard user={user} />
+                user.role === UserRole.ADMIN ? <AdminDashboard user={user} /> :
+                <Navigate to="/" />
               } 
             />
             <Route 
