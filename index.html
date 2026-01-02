@@ -17,24 +17,6 @@
     #boot-error { display: none; position: fixed; inset: 0; background: #fff; color: #ef4444; padding: 2rem; z-index: 9999; font-family: system-ui, sans-serif; overflow: auto; }
     .error-card { max-width: 600px; margin: 2rem auto; border: 2px solid #fee2e2; border-radius: 1.5rem; padding: 2rem; background: #fef2f2; }
   </style>
-  <script>
-    window.onerror = function(msg, url, line, col, error) {
-      const el = document.getElementById('boot-error');
-      if (el) {
-        el.style.display = 'block';
-        el.innerHTML = `
-          <div class="error-card">
-            <h1 style="font-size: 1.5rem; font-weight: 900; margin-bottom: 1rem;">Platform Boot Error</h1>
-            <p style="margin-bottom: 0.5rem;"><strong>Error:</strong> ${msg}</p>
-            <p style="font-size: 0.8rem; color: #991b1b; margin-bottom: 1rem;">Location: ${url}:${line}:${col}</p>
-            <pre style="background: #000; color: #0f0; padding: 1rem; border-radius: 0.5rem; font-size: 0.7rem; overflow-x: auto;">${error?.stack || 'No stack trace available'}</pre>
-            <button onclick="location.reload()" style="margin-top: 1rem; background: #be123c; color: white; padding: 0.75rem 1.5rem; border-radius: 0.75rem; border: none; font-weight: bold; cursor: pointer;">Retry Boot Sequence</button>
-          </div>
-        `;
-      }
-      return false;
-    };
-  </script>
 <script type="importmap">
 {
   "imports": {

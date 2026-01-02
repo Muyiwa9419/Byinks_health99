@@ -17,9 +17,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
   const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleScroll = () => {
-      setScrolled(window.scrollY > 20);
-    };
+    const handleScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
@@ -33,11 +31,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
 
     fetchNotifs();
     window.addEventListener('storage', fetchNotifs);
-    const interval = setInterval(fetchNotifs, 10000);
-    return () => {
-      window.removeEventListener('storage', fetchNotifs);
-      clearInterval(interval);
-    };
+    return () => window.removeEventListener('storage', fetchNotifs);
   }, [user]);
 
   useEffect(() => {
@@ -96,6 +90,12 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
             <div className="flex items-center space-x-6">
               {user ? (
                 <div className="flex items-center space-x-6">
+                  {/* Sync Indicator */}
+                  <div className="flex items-center space-x-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Local Node Sync</span>
+                  </div>
+
                   <div className="relative" ref={notifRef}>
                     <button 
                       onClick={() => { setIsNotifOpen(!isNotifOpen); if(!isNotifOpen) markAsRead(); }}
@@ -124,9 +124,6 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
                             </div>
                           )) : (
                             <div className="py-20 text-center">
-                              <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <svg className="w-6 h-6 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4a2 2 0 012-2m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
-                              </div>
                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">No new alerts</p>
                             </div>
                           )}

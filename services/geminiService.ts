@@ -3,68 +3,65 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 /**
  * Healthcare Intelligence Service
- * Optimized for Gemini 3.0 series
+ * Optimized for Centralized Hospital Management
  */
+
+const getAIClient = () => {
+  if (!process.env.API_KEY) {
+    throw new Error("Missing API Credentials");
+  }
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+};
 
 export const analyzeSymptoms = async (symptoms: string) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
-      contents: `You are a clinical diagnostic logic engine. Analyze the following patient symptoms:
-      
-      "${symptoms}"
-      
-      Structure your response:
-      - Clinical Observations: High-level reasoning.
-      - Urgency Metric: (Routine, Urgent, or Emergency).
-      - Physician Guidance: Questions for the patient to ask their consultant.
-      
-      DISCLAIMER: This is an AI assessment, not a medical diagnosis. Consult a human specialist.`,
+      model: "gemini-3-flash-preview",
+      contents: `Patient symptoms: "${symptoms}"`,
       config: {
+        systemInstruction: `You are a clinical diagnostic logic engine for Byinks Health. Analyze the symptoms and provide:
+        1. Clinical Observations: Patterns identified.
+        2. Urgency: Routine, Urgent, or Emergency.
+        3. Specialist Questions: Preparation for the doctor.
+        
+        DISCLAIMER: This is an AI-powered assessment. Not a medical diagnosis.`,
         temperature: 0.4,
-        topP: 0.9,
+        thinkingConfig: { thinkingBudget: 1000 }
       },
     });
 
-    return response.text || "Diagnostic analysis yielded no clear clinical patterns.";
-  } catch (e) {
-    console.error("AI Analysis Error:", e);
-    return "The clinical AI is currently offline for calibration. Please consult a human doctor.";
+    return response.text || "Clinical analysis yielded inconclusive results. Please consult a human specialist.";
+  } catch (e: any) {
+    console.error("Clinical AI failure:", e);
+    return "The central clinical AI is temporarily recalibrating for global sync. Please consult our human specialists in the directory.";
   }
 };
 
-// Fixed: Renamed from summarizeConversation to summarizePatientHistory to resolve import error in ConsultantDashboard.tsx
 export const summarizePatientHistory = async (messages: string) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `You are a clinical scribe. Summarize this secure healthcare dialogue between a patient and consultant:
-      
-      "${messages}"
-      
-      Identify:
-      1. Primary medical concerns.
-      2. Any mentioned medications or past history.
-      3. Action items for the doctor.`,
+      contents: `Consultation log: "${messages}"`,
       config: {
+        systemInstruction: "You are a clinical scribe. Summarize key medical concerns and action items from this dialogue.",
         temperature: 0.2,
       },
     });
-    return response.text || "Awaiting further clinical data to generate summary.";
+    return response.text || "Awaiting further dialogue history.";
   } catch (e) {
-    console.error("AI Scribe Error:", e);
-    return "Unable to synchronize AI context for this conversation thread.";
+    console.error("Scribe failure:", e);
+    return "AI Scribe is currently unable to sync with this thread.";
   }
 };
 
 export const getHealthTips = async () => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "Generate 3 personalized medical wellness tips for a patient portal feed.",
+      contents: "Generate 3 evidence-based wellness tips.",
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -81,15 +78,12 @@ export const getHealthTips = async () => {
         }
       }
     });
-    
-    const text = response.text;
-    return text ? JSON.parse(text) : [];
+    return response.text ? JSON.parse(response.text) : [];
   } catch (e) {
-    console.error("AI Health Tips Error:", e);
     return [
-      { title: "Hydration Focus", description: "Maintain consistent water intake for metabolic support.", category: "Wellness" },
-      { title: "Recovery Sleep", description: "Prioritize 8 hours of rest for cognitive restoration.", category: "Recovery" },
-      { title: "Active Mobility", description: "Engage in 20 minutes of movement to improve circulation.", category: "Fitness" }
+      { title: "Clinical Hydration", description: "Maintain 3L daily water intake.", category: "Wellness" },
+      { title: "Sleep Hygiene", description: "Prioritize 8 hours of restorative sleep.", category: "Recovery" },
+      { title: "Metabolic Activity", description: "Engage in 20min brisk movement daily.", category: "Fitness" }
     ];
   }
 };
