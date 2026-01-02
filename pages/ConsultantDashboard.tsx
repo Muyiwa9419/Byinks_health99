@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, UserRole, Appointment, ConsultantAvailability, AppNotification } from '../types';
-import { summarizePatientHistory } from '../services/geminiService';
-import CommunicationOverlay from '../components/CommunicationOverlay';
+import { User, UserRole, Appointment, ConsultantAvailability, AppNotification } from '../types.ts';
+import { summarizePatientHistory } from '../services/geminiService.ts';
+import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
 
 interface ConsultantDashboardProps {
   user: User;

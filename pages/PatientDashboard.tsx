@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { User, UserRole } from '../types';
-import { analyzeSymptoms, getHealthTips } from '../services/geminiService';
-import CommunicationOverlay from '../components/CommunicationOverlay';
+import { User, UserRole } from '../types.ts';
+import { analyzeSymptoms, getHealthTips } from '../services/geminiService.ts';
+import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
 
 interface PatientDashboardProps {
   user: User;

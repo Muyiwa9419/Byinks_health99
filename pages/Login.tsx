@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { User, UserRole } from '../types';
+import { User, UserRole } from '../types.ts';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -64,7 +64,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         role: isAdmin ? UserRole.ADMIN : UserRole.PATIENT,
         isApproved: true,
         ...(role === UserRole.PATIENT ? {
-          age: parseInt(age),
+          age: parseInt(age) || 0,
           bloodType,
           genotype,
           height,

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { User, UserRole, AppNotification } from '../types';
+import { User, UserRole, AppNotification } from '../types.ts';
 
 interface NavbarProps {
   user: User | null;

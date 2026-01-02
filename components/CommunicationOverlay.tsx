@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
-import { User, UserRole, Transaction, Appointment, AppNotification } from '../types';
+import { User, UserRole, Transaction, Appointment, AppNotification } from '../types.ts';
 
 interface Message {
   senderId: string;
@@ -125,42 +125,46 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   };
 
   const connectToGeminiLive = async (stream: MediaStream) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const inputCtx = new AudioContext({ sampleRate: 16000 });
-    const outputCtx = new AudioContext({ sampleRate: 24000 });
-    audioContextRef.current = outputCtx;
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const inputCtx = new AudioContext({ sampleRate: 16000 });
+      const outputCtx = new AudioContext({ sampleRate: 24000 });
+      audioContextRef.current = outputCtx;
 
-    const sessionPromise = ai.live.connect({
-      model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-      config: {
-        responseModalities: [Modality.AUDIO],
-        outputAudioTranscription: {},
-        systemInstruction: `Clinical Scribe. Logging interaction between ${currentUser.name} and Dr. ${targetUser.name}.`
-      },
-      callbacks: {
-        onopen: () => {
-          setIsLiveActive(true);
-          const source = inputCtx.createMediaStreamSource(stream);
-          const processor = inputCtx.createScriptProcessor(4096, 1, 1);
-          processor.onaudioprocess = (e) => {
-            const inputData = e.inputBuffer.getChannelData(0);
-            const int16 = new Int16Array(inputData.length);
-            for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(int16.buffer)));
-            sessionPromise.then(s => s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }));
-          };
-          source.connect(processor);
-          processor.connect(inputCtx.destination);
+      const sessionPromise = ai.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        config: {
+          responseModalities: [Modality.AUDIO],
+          outputAudioTranscription: {},
+          systemInstruction: `Clinical Scribe. Logging interaction between ${currentUser.name} and Dr. ${targetUser.name}.`
         },
-        onmessage: async (msg: LiveServerMessage) => {
-          if (msg.serverContent?.outputTranscription) {
-            setTranscription(prev => (prev + ' ' + msg.serverContent!.outputTranscription!.text).slice(-300));
-          }
-        },
-        onclose: () => setIsLiveActive(false)
-      }
-    });
-    sessionRef.current = await sessionPromise;
+        callbacks: {
+          onopen: () => {
+            setIsLiveActive(true);
+            const source = inputCtx.createMediaStreamSource(stream);
+            const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+            processor.onaudioprocess = (e) => {
+              const inputData = e.inputBuffer.getChannelData(0);
+              const int16 = new Int16Array(inputData.length);
+              for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
+              const base64 = btoa(String.fromCharCode(...new Uint8Array(int16.buffer)));
+              sessionPromise.then(s => s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }));
+            };
+            source.connect(processor);
+            processor.connect(inputCtx.destination);
+          },
+          onmessage: async (msg: LiveServerMessage) => {
+            if (msg.serverContent?.outputTranscription) {
+              setTranscription(prev => (prev + ' ' + msg.serverContent!.outputTranscription!.text).slice(-300));
+            }
+          },
+          onclose: () => setIsLiveActive(false)
+        }
+      });
+      sessionRef.current = await sessionPromise;
+    } catch (e) {
+      console.warn("MediSphere: Gemini Live currently unavailable.", e);
+    }
   };
 
   const endSession = () => {
@@ -208,7 +212,8 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       text: inputText, 
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
     };
-    const updated = [...messages, newMsg];
+    const stored = JSON.parse(localStorage.getItem(`chat_${chatId}`) || '[]');
+    const updated = [...stored, newMsg];
     setMessages(updated);
     localStorage.setItem(`chat_${chatId}`, JSON.stringify(updated));
     
@@ -378,7 +383,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                </div>
                <div className="flex items-center space-x-3 p-4 bg-white/5 rounded-2xl border border-white/5">
                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data Locality: Nigeria</span>
+                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data Locality: Global</span>
                </div>
             </div>
           </div>
@@ -386,7 +391,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           <div className="mt-10 pt-10 border-t border-white/5 text-center">
              <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4">Post-Session Billing</p>
              <div className="text-2xl font-black text-white mb-2">${SESSION_FEE}</div>
-             <p className="text-[8px] text-slate-500 font-bold uppercase tracking-tight">Standard Specialist Consultation Rate</p>
+             <p className="text-[8px] text-slate-500 font-bold uppercase tracking-tight">Standard Consultation Rate</p>
           </div>
         </div>
       </div>
