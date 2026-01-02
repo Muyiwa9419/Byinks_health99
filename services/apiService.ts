@@ -25,6 +25,69 @@ export const ClinicalAPI = {
     return !!supabase;
   },
 
+  /**
+   * Seeds the hospital with default specialists if the registry is empty.
+   */
+  seedDefaultData() {
+    if (this.isConfigured()) return; // Cloud manages its own data
+
+    const users = getLocalCollection<User>('registered_users');
+    if (users.length === 0) {
+      const defaultDoctors: User[] = [
+        {
+          id: 'doc-1',
+          name: 'Dr. Sarah Jenkins',
+          email: 'sarah.j@byinkshealth.com',
+          role: UserRole.CONSULTANT,
+          specialty: 'Cardiology',
+          isApproved: true,
+          avatar: 'https://i.pravatar.cc/150?u=sarah'
+        },
+        {
+          id: 'doc-2',
+          name: 'Dr. Michael Chen',
+          email: 'm.chen@byinkshealth.com',
+          role: UserRole.CONSULTANT,
+          specialty: 'Pediatrics',
+          isApproved: true,
+          avatar: 'https://i.pravatar.cc/150?u=michael'
+        },
+        {
+          id: 'doc-3',
+          name: 'Dr. Elena Rodriguez',
+          email: 'elena.r@byinkshealth.com',
+          role: UserRole.CONSULTANT,
+          specialty: 'Neurology',
+          isApproved: true,
+          avatar: 'https://i.pravatar.cc/150?u=elena'
+        },
+        {
+          id: 'admin-1',
+          name: 'System Admin',
+          email: 'admin@byinkshealth.com',
+          role: UserRole.ADMIN,
+          isApproved: true
+        }
+      ];
+      saveLocalCollection('registered_users', defaultDoctors);
+      
+      // Seed some initial wellness tips if none exist
+      const notifications: AppNotification[] = [
+        {
+          id: 'welcome-notif',
+          userId: 'all',
+          title: 'Welcome to Byinks Health',
+          message: 'Our clinical specialists are now online and ready to assist you.',
+          timestamp: new Date().toISOString(),
+          isRead: false,
+          type: 'system'
+        }
+      ];
+      saveLocalCollection('notifications', notifications);
+      window.dispatchEvent(new Event('storage'));
+    }
+  },
+
   // --- AUTH OPERATIONS ---
   async signUp(email: string, pass: string, profile: User): Promise<User> {
     if (this.isConfigured()) {

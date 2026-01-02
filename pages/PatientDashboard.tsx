@@ -33,6 +33,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
       const storedUsersStr = localStorage.getItem('medi_registered_users');
       if (storedUsersStr) {
         const allUsers: User[] = JSON.parse(storedUsersStr);
+        // Only show approved consultants in the direct directory
         const doctors = allUsers.filter(u => u.role === UserRole.CONSULTANT && u.isApproved);
         setConsultants(doctors);
       }
@@ -209,39 +210,49 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">Clinical Directory</h2>
-                  <p className="text-slate-500 font-medium text-sm">Verified specialists currently available.</p>
+                  <p className="text-slate-500 font-medium text-sm">Verified specialists currently online.</p>
                 </div>
-                <input 
-                  type="text" 
-                  placeholder="Search specialty..." 
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-6 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                />
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    placeholder="Search specialists..." 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500 transition-all w-full md:w-64"
+                  />
+                  <svg className="w-5 h-5 absolute left-4 top-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                </div>
               </div>
 
               <div className="grid sm:grid-cols-2 gap-6">
                 {filteredConsultants.length > 0 ? filteredConsultants.map((c) => (
-                  <div key={c.id} className="p-6 bg-slate-50 border border-slate-100 rounded-3xl hover:border-emerald-500 hover:bg-white transition-all group">
+                  <div key={c.id} className="p-6 bg-slate-50 border border-slate-100 rounded-3xl hover:border-emerald-500 hover:bg-white hover:shadow-xl transition-all group animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <div className="flex items-center space-x-4 mb-5">
-                      <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center text-white font-bold text-xl">
-                        {c.name.charAt(0)}
+                      <div className="relative">
+                        <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-emerald-100 overflow-hidden">
+                          {c.avatar ? <img src={c.avatar} alt="" className="w-full h-full object-cover" /> : c.name.charAt(0)}
+                        </div>
+                        <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white rounded-full"></div>
                       </div>
                       <div>
-                        <h4 className="font-bold text-slate-900">{c.name}</h4>
-                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">{c.specialty || 'GP'}</span>
+                        <h4 className="font-bold text-slate-900 leading-none mb-1">{c.name}</h4>
+                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">{c.specialty || 'General Practitioner'}</span>
                       </div>
                     </div>
                     <div className="flex space-x-3">
-                      <button onClick={() => openComm('chat', { name: c.name, role: UserRole.CONSULTANT, id: c.id })} className="flex-grow bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest py-3 rounded-xl hover:bg-emerald-600 hover:text-white transition">Chat</button>
-                      <button onClick={() => openComm('video', { name: c.name, role: UserRole.CONSULTANT, id: c.id })} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-emerald-600 hover:text-white transition">
+                      <button onClick={() => openComm('chat', { name: c.name, role: UserRole.CONSULTANT, id: c.id })} className="flex-grow bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest py-3 rounded-xl hover:bg-emerald-600 hover:text-white transition shadow-sm">Initiate Chat</button>
+                      <button onClick={() => openComm('video', { name: c.name, role: UserRole.CONSULTANT, id: c.id })} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-emerald-600 hover:text-white transition shadow-sm">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                       </button>
                     </div>
                   </div>
                 )) : (
-                  <div className="col-span-full py-12 text-center bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                    <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">No specialists found.</p>
+                  <div className="col-span-full py-20 text-center bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-200">
+                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-slate-200 shadow-sm">
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                    </div>
+                    <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">No active specialists found.</p>
+                    <p className="text-slate-400 text-[10px] mt-1 italic">Our medical team is currently being onboarded.</p>
                   </div>
                 )}
               </div>
@@ -266,8 +277,8 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
             </div>
           </section>
 
-          <section className="bg-slate-900 rounded-[2rem] p-8 text-white relative overflow-hidden">
-            <h2 className="text-lg font-bold mb-6">Quick Links</h2>
+          <section className="bg-slate-900 rounded-[2rem] p-8 text-white relative overflow-hidden shadow-2xl">
+            <h2 className="text-lg font-bold mb-6">Quick Actions</h2>
             <div className="space-y-3 relative z-10">
               <Link to="/profile" className="flex items-center w-full px-5 py-4 text-xs font-black uppercase tracking-widest bg-white/5 hover:bg-white/10 rounded-2xl transition border border-white/5">
                 <svg className="w-4 h-4 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
@@ -275,7 +286,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
               </Link>
               <button onClick={() => setIsSyncOpen(true)} className="flex items-center w-full px-5 py-4 text-xs font-black uppercase tracking-widest bg-emerald-600/20 hover:bg-emerald-600/30 rounded-2xl transition border border-emerald-500/30 text-emerald-400">
                 <svg className="w-4 h-4 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" /></svg>
-                Sync Device Data
+                Sync Data Mobility
               </button>
             </div>
             <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-emerald-600/10 rounded-full blur-2xl"></div>
@@ -295,7 +306,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
             <div className="space-y-8 relative z-10">
               <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
                 <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-3">Backup Data (Source)</h4>
-                <p className="text-xs text-slate-500 mb-4 font-medium leading-relaxed">Click to generate a secure token containing your medical records and notifications.</p>
+                <p className="text-xs text-slate-500 mb-4 font-medium leading-relaxed">Generate a secure token for this clinical terminal.</p>
                 <button 
                   onClick={generateSyncToken}
                   className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition"
@@ -306,10 +317,10 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
 
               <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
                 <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-3">Restore Data (Target)</h4>
-                <p className="text-xs text-slate-500 mb-4 font-medium leading-relaxed">Import health data from another clinical node by verifying your email.</p>
+                <p className="text-xs text-slate-500 mb-4 font-medium leading-relaxed">Import health data by verifying your email identity.</p>
                 <input 
                   type="email" 
-                  placeholder="Registered Clinical Email" 
+                  placeholder="Clinical ID (Email)" 
                   value={syncEmailInput}
                   onChange={(e) => setSyncEmailInput(e.target.value)}
                   className="w-full px-5 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold mb-3 outline-none focus:border-emerald-600 transition"
@@ -324,7 +335,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
                   onClick={handlePersonalSync}
                   className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-emerald-600 transition"
                 >
-                  Verify & Sync Records
+                  Authorize Synchronization
                 </button>
               </div>
             </div>
@@ -333,7 +344,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
               onClick={() => setIsSyncOpen(false)}
               className="mt-6 w-full text-[9px] font-black text-slate-300 uppercase tracking-[0.3em] hover:text-slate-900 transition"
             >
-              Dismiss Sync Hub
+              Dismiss Hub
             </button>
           </div>
         </div>

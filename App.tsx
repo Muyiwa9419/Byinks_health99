@@ -53,6 +53,9 @@ const App: React.FC = () => {
   const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
 
   useEffect(() => {
+    // Seed default data for local testing
+    ClinicalAPI.seedDefaultData();
+
     const checkSession = async () => {
       try {
         if (ClinicalAPI.isConfigured()) {
