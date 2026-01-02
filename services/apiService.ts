@@ -19,10 +19,20 @@ export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
 const clinicalBridge = new BroadcastChannel('medi_clinical_bridge');
 
 const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getItem(`medi_${key}`) || '[]');
+
+/**
+ * Enhanced Save: Updates local storage and broadcasts to Clinical Cloud for cross-device sync
+ */
 const saveLocalCollection = <T>(key: string, data: T[]) => {
-  localStorage.setItem(`medi_${key}`, JSON.stringify(data));
-  clinicalBridge.postMessage({ type: 'REFRESH_COLLECTION', key });
+  const fullKey = `medi_${key}`;
+  localStorage.setItem(fullKey, JSON.stringify(data));
+  
+  // Cross-tab sync
+  clinicalBridge.postMessage({ type: 'REFRESH_COLLECTION', key: fullKey });
   window.dispatchEvent(new Event('storage'));
+  
+  // Cross-device sync (Cloud Broadcast)
+  ClinicalAPI.broadcastSystemEvent('COLLECTION_UPDATE', { key: fullKey, data });
 };
 
 export const ClinicalAPI = {
@@ -101,17 +111,15 @@ export const ClinicalAPI = {
     window.dispatchEvent(new Event('storage'));
   },
 
-  pushToCloud(email: string, payload: any) {
-    const vault = JSON.parse(localStorage.getItem('medi_cloud_vault') || '{}');
-    vault[email.toLowerCase()] = { ...payload, lastSync: new Date().toISOString() };
-    localStorage.setItem('medi_cloud_vault', JSON.stringify(vault));
-    clinicalBridge.postMessage({ type: 'CLOUD_PUSH', email });
-    window.dispatchEvent(new Event('storage'));
+  // Added pushToCloud method for clinical snapshot backup
+  pushToCloud(email: string, data: Record<string, string>) {
+    localStorage.setItem(`cloud_vault_${email.toLowerCase()}`, JSON.stringify(data));
   },
 
-  pullFromCloud(email: string) {
-    const vault = JSON.parse(localStorage.getItem('medi_cloud_vault') || '{}');
-    return vault[email.toLowerCase()] || null;
+  // Added pullFromCloud method for clinical snapshot recovery
+  pullFromCloud(email: string): Record<string, string> | null {
+    const data = localStorage.getItem(`cloud_vault_${email.toLowerCase()}`);
+    return data ? JSON.parse(data) : null;
   },
 
   seedDefaultData() {
@@ -175,7 +183,6 @@ export const ClinicalAPI = {
     const idx = users.findIndex(u => u.id === user.id);
     if (idx > -1) users[idx] = user; else users.push(user);
     saveLocalCollection('registered_users', users);
-    this.broadcastSystemEvent('USER_UPDATE', { userId: user.id });
   },
 
   async updateUserStatus(userId: string, updates: Partial<User>): Promise<void> {
@@ -184,7 +191,6 @@ export const ClinicalAPI = {
     if (idx > -1) {
       users[idx] = { ...users[idx], ...updates };
       saveLocalCollection('registered_users', users);
-      this.broadcastSystemEvent('USER_UPDATE', { userId });
     }
   },
 
@@ -198,7 +204,6 @@ export const ClinicalAPI = {
     if (idx > -1) {
       syncs[idx].status = status;
       saveLocalCollection('sync_requests', syncs);
-      this.broadcastSystemEvent('SYNC_UPDATE', { requestId });
     }
   }
 };
