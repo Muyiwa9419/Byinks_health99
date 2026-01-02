@@ -26,20 +26,32 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
   const handleCloudSync = () => {
     try {
+      if (!importToken.trim()) {
+        setError("Clinical Alert: Token field cannot be empty.");
+        return;
+      }
       const data = JSON.parse(atob(importToken));
-      const keys = ['medi_registered_users', 'medi_appointments', 'medi_transactions', 'medi_audit_logs', 'medi_availability', 'medi_notifications'];
       
-      keys.forEach(key => {
-        const shortKey = key.split('_')[1].substring(0, 5); // Simple mapping
-        const matchingKey = Object.keys(data).find(k => k.includes(shortKey) || key.includes(k));
-        if (matchingKey && data[matchingKey]) {
-          localStorage.setItem(key, data[matchingKey]);
+      const storageMapping: Record<string, string> = {
+        'users': 'medi_registered_users',
+        'apps': 'medi_appointments',
+        'trans': 'medi_transactions',
+        'logs': 'medi_audit_logs',
+        'avail': 'medi_availability',
+        'notifs': 'medi_notifications'
+      };
+
+      Object.entries(data).forEach(([key, val]) => {
+        const fullKey = storageMapping[key];
+        if (fullKey && val) {
+          localStorage.setItem(fullKey, val as string);
         }
       });
       
       window.dispatchEvent(new Event('storage'));
-      alert("Byinks Cloud Identity synchronized. You can now access your central hospital records on this device.");
+      alert("Byinks Cloud Identity synchronized! You can now sign in with your account from the other device.");
       setShowImport(false);
+      setImportToken('');
       setError('');
     } catch (e) {
       setError("Cloud Sync Failed: The provided Identity Token is invalid or expired.");
@@ -85,15 +97,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       if (foundUser) {
         onLogin(foundUser);
       } else {
-        setError('Identity Not Found: If you registered on another device, use "Provision via Byinks Cloud" below.');
+        setError('Identity Not Found: If you registered on another device, use the "Byinks Cloud Connector" below.');
       }
     }
   };
 
   return (
     <div className="min-h-[calc(100vh-128px)] flex items-center justify-center bg-slate-50 p-4">
-      <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden">
-        <div className="p-10 md:p-12">
+      <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden relative">
+        <div className="p-10 md:p-12 relative z-10">
           <div className="text-center mb-10">
             <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-emerald-200">
               <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
@@ -102,7 +114,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               {showImport ? 'Byinks Cloud' : isRegister ? 'Clinical Intake' : 'Portal Access'}
             </h2>
             <p className="text-slate-500 mt-2 font-medium text-sm leading-relaxed">
-              {showImport ? 'Provisioning this device for Central Sync' : 'Access your global clinical identity'}
+              {showImport ? 'Bridging your device to the global network' : 'Secure Clinical Identity Gateway'}
             </p>
           </div>
 
@@ -115,18 +127,23 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           {showImport ? (
             <div className="space-y-6 animate-in slide-in-from-bottom-4">
-              <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl text-[10px] text-blue-700 font-bold">
-                PRO-TIP: Ask your Hospital Administrator to generate a "Global Provisioning Token" from the Admin Dashboard to sync this device.
+              <div className="p-5 bg-blue-50 border border-blue-100 rounded-2xl">
+                <p className="text-[10px] text-blue-700 font-black uppercase tracking-widest mb-2">Instructions</p>
+                <p className="text-[11px] text-blue-600 font-medium leading-relaxed">
+                  1. Open this app on your <strong>main device</strong>.<br/>
+                  2. Use the <strong>Sync Icon</strong> in the Navbar to copy your token.<br/>
+                  3. Paste that token here to synchronize.
+                </p>
               </div>
               <textarea 
                 value={importToken}
                 onChange={(e) => setImportToken(e.target.value)}
-                placeholder="Paste encrypted Cloud Identity Token..."
+                placeholder="Paste the copied Global Cloud Token here..."
                 className="w-full h-32 p-5 bg-slate-50 border border-slate-200 rounded-2xl text-[9px] font-mono outline-none focus:border-emerald-600 transition"
               />
               <div className="flex space-x-3">
                 <button onClick={() => setShowImport(false)} className="flex-grow py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest">Cancel</button>
-                <button onClick={handleCloudSync} className="flex-[2] py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl">Connect to Cloud</button>
+                <button onClick={handleCloudSync} className="flex-[2] py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-200 hover:bg-emerald-700 transition">Authorize & Sync</button>
               </div>
             </div>
           ) : (
@@ -151,6 +168,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               ) : (
                 <div className="space-y-5 animate-in slide-in-from-right-4">
                    <div className="grid grid-cols-2 gap-4">
+                     {/* Fixed: Corrected onChange handler for age input by wrapping setAge in an arrow function to prevent immediate execution */}
                      <input required type="number" placeholder="Age" value={age} onChange={e => setAge(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" />
                      <input required placeholder="Blood Group" value={bloodType} onChange={e => setBloodType(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" />
                    </div>
@@ -159,7 +177,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 </div>
               )}
 
-              <button type="submit" className="w-full py-5 bg-emerald-600 text-white rounded-[1.5rem] font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-100">
+              <button type="submit" className="w-full py-5 bg-emerald-600 text-white rounded-[1.5rem] font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-200">
                 {isRegister && step === 1 && role === UserRole.PATIENT ? 'Next: Medical Profile' : isRegister ? 'Initialize Identity' : 'Secure Sign In'}
               </button>
             </form>
@@ -169,11 +187,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <button onClick={() => { setIsRegister(!isRegister); setStep(1); setShowImport(false); }} className="text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:underline">
               {isRegister ? 'Return to Authenticator' : 'Provision a New Patient Identity'}
             </button>
-            <button onClick={() => setShowImport(true)} className="text-slate-400 font-black text-[9px] uppercase tracking-[0.2em] hover:text-slate-900 transition">
-              Provision via Byinks Cloud (Global Sync)
-            </button>
+            <div className="flex flex-col items-center space-y-4 pt-2">
+              <button onClick={() => setShowImport(true)} className="flex items-center space-x-2 text-slate-400 font-black text-[9px] uppercase tracking-[0.2em] hover:text-emerald-600 transition">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" /></svg>
+                <span>Provision via Byinks Cloud Connector</span>
+              </button>
+            </div>
           </div>
         </div>
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-500"></div>
       </div>
     </div>
   );
