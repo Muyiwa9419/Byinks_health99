@@ -33,7 +33,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   // Post-Consultation Payment state
   const [sessionCompleted, setSessionCompleted] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
-  const SESSION_FEE = 25;
+  const SESSION_FEE = 45;
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
