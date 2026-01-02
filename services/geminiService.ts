@@ -3,71 +3,64 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 /**
  * Healthcare Intelligence Service
- * Powered by Gemini 3.0
+ * Optimized for Gemini 3.0
  */
-
-const getAIInstance = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API_KEY is missing from the environment.");
-  }
-  return new GoogleGenAI({ apiKey });
-};
 
 export const analyzeSymptoms = async (symptoms: string) => {
   try {
-    const ai = getAIInstance();
-    // Using gemini-3-pro-preview for complex medical reasoning tasks
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-pro-preview",
-      contents: `You are a clinical diagnostic assistant. Analyze the following symptoms and provide a potential health assessment. 
-      IMPORTANT: Always include a disclaimer that this is not a substitute for professional medical advice.
+      contents: `You are a professional clinical assistant. Perform a high-level analysis of these symptoms:
       
-      Symptoms to analyze: ${symptoms}`,
+      "${symptoms}"
+      
+      Provide:
+      1. Potential concerns (non-diagnostic).
+      2. Recommended urgency level.
+      3. Questions for the patient to ask their doctor.
+      
+      DISCLAIMER: This is an AI assessment and not a medical diagnosis.`,
       config: {
         temperature: 0.7,
         topP: 0.95,
-        topK: 40,
       },
     });
 
-    return response.text || "The diagnostic engine could not interpret the provided symptoms. Please try rephrasing.";
-  } catch (e: any) {
-    console.error("Clinical AI Analysis Failure:", e);
-    if (e.message?.includes("API_KEY")) {
-      return "Critical Error: Clinical AI credentials are not configured. Please contact the system administrator.";
-    }
-    return "The clinical AI engine is experiencing high latency or is currently offline. Please consult a human specialist immediately.";
+    return response.text || "The diagnostic engine is unable to process this request. Rephrase your symptoms.";
+  } catch (e) {
+    console.error("Gemini Symptom Analysis Error:", e);
+    return "Clinical AI offline. Please consult the specialists in the directory directly.";
   }
 };
 
 export const summarizePatientHistory = async (history: string) => {
   try {
-    const ai = getAIInstance();
-    // Using gemini-3-flash-preview for fast summarization
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `You are a medical scribe. Summarize the following patient clinical history for a consultant. 
-      Highlight significant diagnoses, medication lists, and alarming trends.
+      contents: `Summarize the following clinical dialogue/history for a medical consultant:
       
-      Clinical Data: ${history}`,
+      "${history}"
+      
+      Highlight key medical complaints and potential risks.`,
       config: {
-        temperature: 0.2,
+        temperature: 0.3,
       },
     });
-    return response.text || "History summarization yielded no significant clinical insights.";
+    return response.text || "Summary unavailable.";
   } catch (e) {
-    console.error("Clinical AI Summary Failure:", e);
-    return "The AI Scribe is currently unable to synchronize patient history. Please review the raw records.";
+    console.error("Gemini History Summary Error:", e);
+    return "The AI scribe is currently unable to process the history.";
   }
 };
 
 export const getHealthTips = async () => {
   try {
-    const ai = getAIInstance();
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "Generate 3 personalized daily health tips for a general patient to improve holistic well-being.",
+      contents: "Generate 3 personalized health tips for wellness and preventative care.",
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -75,9 +68,9 @@ export const getHealthTips = async () => {
           items: {
             type: Type.OBJECT,
             properties: {
-              title: { type: Type.STRING, description: "Short title of the tip" },
-              description: { type: Type.STRING, description: "Actionable healthcare advice" },
-              category: { type: Type.STRING, description: "Health domain (e.g., Wellness, Nutrition)" }
+              title: { type: Type.STRING },
+              description: { type: Type.STRING },
+              category: { type: Type.STRING }
             },
             required: ["title", "description", "category"],
           }
@@ -85,18 +78,14 @@ export const getHealthTips = async () => {
       }
     });
     
-    const jsonStr = response.text?.trim();
-    if (!jsonStr) return getDefaultTips();
-    
-    return JSON.parse(jsonStr);
+    const text = response.text;
+    return text ? JSON.parse(text) : [];
   } catch (e) {
-    console.error("Health Intelligence Feed Failure:", e);
-    return getDefaultTips();
+    console.error("Gemini Health Tips Error:", e);
+    return [
+      { title: "Hydration", description: "Drink 3 liters of water daily.", category: "Wellness" },
+      { title: "Activity", description: "Walk for 30 minutes today.", category: "Fitness" },
+      { title: "Rest", description: "Ensure 8 hours of sleep.", category: "Recovery" }
+    ];
   }
 };
-
-const getDefaultTips = () => [
-  { title: "Hydration Protocol", description: "Consume 3 liters of filtered water today to maintain renal efficiency.", category: "Wellness" },
-  { title: "Circadian Alignment", description: "Expose your eyes to sunlight for 15 minutes this morning to regulate cortisol.", category: "Recovery" },
-  { title: "Nutritional Density", description: "Incorporate dark leafy greens into your next meal for magnesium support.", category: "Nutrition" }
-];

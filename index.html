@@ -18,7 +18,6 @@
     .error-card { max-width: 600px; margin: 2rem auto; border: 2px solid #fee2e2; border-radius: 1.5rem; padding: 2rem; background: #fef2f2; }
   </style>
   <script>
-    // Error handling for boot sequence
     window.onerror = function(msg, url, line, col, error) {
       const el = document.getElementById('boot-error');
       if (el) {
