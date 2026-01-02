@@ -64,9 +64,11 @@ export interface Transaction {
   description: string;
 }
 
-export interface HealthMetric {
-  label: string;
-  value: number;
-  unit: string;
-  change: number;
+export interface SyncRequest {
+  id: string;
+  requesterEmail: string;
+  deviceInfo: string;
+  token: string;
+  status: 'pending' | 'approved' | 'rejected';
+  timestamp: string;
 }

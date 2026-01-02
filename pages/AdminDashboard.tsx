@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, Appointment, Transaction } from '../types.ts';
+import { User, UserRole, Appointment, Transaction, SyncRequest } from '../types.ts';
 import { ClinicalAPI } from '../services/apiService.ts';
 
 interface AdminDashboardProps {
@@ -16,14 +16,16 @@ interface AuditLog {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
+  const [activeTab, setActiveTab] = useState<'users' | 'sync'>('users');
   const [liveStats, setLiveStats] = useState([
-    { label: 'Cloud Synchronized Patients', value: '0', trend: 'Global', color: 'blue' },
-    { label: 'Active Specialists', value: '0', trend: 'Verified', color: 'purple' },
-    { label: 'Consultations Today', value: '0', trend: 'Real-time', color: 'green' },
-    { label: 'Network Revenue', value: '$0', trend: 'Authorized', color: 'indigo' },
+    { label: 'Cloud Identities', value: '0', trend: 'Global', color: 'blue' },
+    { label: 'Clinical Specialists', value: '0', trend: 'Verified', color: 'purple' },
+    { label: 'Appointments Today', value: '0', trend: 'Real-time', color: 'green' },
+    { label: 'Total Revenue', value: '$0', trend: 'Authorized', color: 'indigo' },
   ]);
 
   const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [syncRequests, setSyncRequests] = useState<SyncRequest[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOnboardOpen, setIsOnboardOpen] = useState(false);
@@ -38,7 +40,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
   const fetchData = async () => {
     setLoading(true);
-    const users = await ClinicalAPI.getAllUsers();
+    const [users, syncs] = await Promise.all([
+      ClinicalAPI.getAllUsers(),
+      ClinicalAPI.getSyncRequests()
+    ]);
     
     const totalPatients = users.filter(u => u.role === UserRole.PATIENT).length;
     const activeConsultants = users.filter(u => u.role === UserRole.CONSULTANT && u.isApproved).length;
@@ -54,10 +59,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       { label: 'Cloud Identities', value: totalPatients.toLocaleString(), trend: 'Global', color: 'blue' },
       { label: 'Clinical Specialists', value: activeConsultants.toLocaleString(), trend: 'Verified', color: 'purple' },
       { label: 'Appointments Today', value: appsToday.toLocaleString(), trend: 'Live', color: 'green' },
-      { label: 'Total Network Revenue', value: `$${totalRevenue.toLocaleString()}`, trend: 'Gross', color: 'indigo' },
+      { label: 'Total Revenue', value: `$${totalRevenue.toLocaleString()}`, trend: 'Gross', color: 'indigo' },
     ]);
 
     setAllUsers(users);
+    setSyncRequests(syncs);
     setAuditLogs(storedLogs);
     setLoading(false);
   };
@@ -72,40 +78,41 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     try {
       await ClinicalAPI.updateUserStatus(userId, { role: newRole });
       fetchData();
-    } catch (e) {
-      alert("Failed to update user role.");
-    }
+    } catch (e) { alert("Failed to update user role."); }
   };
 
   const handleApproveDoctor = async (userId: string) => {
     try {
       await ClinicalAPI.updateUserStatus(userId, { isApproved: true });
       fetchData();
-    } catch (e) {
-      alert("Failed to approve consultant.");
-    }
+    } catch (e) { alert("Failed to approve consultant."); }
+  };
+
+  const handleUpdateSyncStatus = async (requestId: string, status: 'approved' | 'rejected') => {
+    try {
+      await ClinicalAPI.updateSyncRequestStatus(requestId, status);
+      fetchData();
+      alert(`Device sync request ${status}.`);
+    } catch (e) { alert("Failed to update sync request."); }
   };
 
   const handleOnboardSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const newUser: User = {
-        id: '', // API handles generation
+        id: '', 
         name: onboardForm.name,
         email: onboardForm.email.toLowerCase(),
         role: onboardForm.role,
         specialty: onboardForm.role === UserRole.CONSULTANT ? onboardForm.specialty : undefined,
         isApproved: true
       };
-      
       await ClinicalAPI.adminCreateUser(newUser);
       setIsOnboardOpen(false);
       setOnboardForm({ name: '', email: '', role: UserRole.CONSULTANT, specialty: '' });
       fetchData();
       alert("Account provisioned successfully.");
-    } catch (err: any) {
-      alert(err.message || "Failed to onboard clinical identity.");
-    }
+    } catch (err: any) { alert(err.message || "Failed to onboard identity."); }
   };
 
   return (
@@ -116,11 +123,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           <p className="text-slate-500 font-bold mt-1 uppercase text-[10px] tracking-[0.2em]">Clinical Infrastructure Control</p>
         </div>
         <div className="flex space-x-4">
-          <button 
-            onClick={() => setIsOnboardOpen(true)}
-            className="px-6 py-4 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl flex items-center shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition"
-          >
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+          <button onClick={() => setIsOnboardOpen(true)} className="px-6 py-4 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition">
             Onboard Identity
           </button>
           <div className="px-6 py-4 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl flex items-center">
@@ -142,173 +145,101 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         ))}
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-10">
-        <div className="lg:col-span-12 space-y-10">
-          <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-xl shadow-slate-200/20 overflow-hidden">
-             <div className="mb-10 flex justify-between items-center">
-               <h2 className="text-2xl font-black text-slate-900 tracking-tight">Clinical Registry Management</h2>
-               <button onClick={fetchData} className="p-2 bg-slate-50 rounded-xl hover:bg-slate-100 transition">
-                 <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-               </button>
-             </div>
-             
-             {loading ? (
-                <div className="py-20 flex justify-center"><div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div></div>
-             ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="text-[9px] font-black text-slate-300 uppercase tracking-widest border-b border-slate-50">
-                        <th className="pb-4">Clinical Identity</th>
-                        <th className="pb-4">Primary Role</th>
-                        <th className="pb-4">Status</th>
-                        <th className="pb-4 text-right">Administrative Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {allUsers.map(u => (
-                        <tr key={u.id} className="group transition-all hover:bg-slate-50/50">
-                          <td className="py-6">
-                            <div className="flex items-center space-x-4">
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-white ${u.role === UserRole.ADMIN ? 'bg-slate-900' : 'bg-emerald-600'}`}>
-                                {u.name.charAt(0)}
-                              </div>
-                              <div>
-                                <p className="text-sm font-black text-slate-900">{u.name}</p>
-                                <p className="text-[10px] text-slate-400 font-bold">{u.email}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-6">
-                            <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg ${
-                              u.role === UserRole.ADMIN ? 'bg-slate-900 text-white' : 
-                              u.role === UserRole.CONSULTANT ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-500'
-                            }`}>
-                              {u.role}
-                            </span>
-                          </td>
-                          <td className="py-6">
-                            <div className="flex items-center">
-                              {u.isApproved ? (
-                                <span className="flex items-center text-emerald-600 text-[9px] font-black uppercase tracking-widest">
-                                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-2"></span>Verified
-                                </span>
-                              ) : (
-                                <span className="flex items-center text-amber-500 text-[9px] font-black uppercase tracking-widest">
-                                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full mr-2 animate-pulse"></span>Pending Approval
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-6 text-right">
-                            <div className="flex justify-end space-x-2">
-                              {u.role === UserRole.CONSULTANT && !u.isApproved && (
-                                <button 
-                                  onClick={() => handleApproveDoctor(u.id)}
-                                  className="px-4 py-2 bg-emerald-600 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-emerald-700 transition"
-                                >
-                                  Approve
-                                </button>
-                              )}
-                              <select 
-                                onChange={(e) => handleUpdateRole(u.id, e.target.value as UserRole)}
-                                value={u.role}
-                                className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[9px] font-black uppercase tracking-widest outline-none focus:border-emerald-600"
-                              >
-                                <option value={UserRole.PATIENT}>Patient</option>
-                                <option value={UserRole.CONSULTANT}>Consultant</option>
-                                <option value={UserRole.ADMIN}>Admin</option>
-                              </select>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-             )}
-          </section>
-
-          <section className="bg-slate-900 p-10 rounded-[3rem] shadow-2xl text-white relative overflow-hidden">
-              <h2 className="text-xs font-black uppercase tracking-[0.3em] text-emerald-400 mb-8">Clinical Event Log</h2>
-              <div className="space-y-6 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar relative z-10">
-                {auditLogs.length > 0 ? auditLogs.map(log => (
-                  <div key={log.id} className="p-5 bg-white/5 rounded-2xl border border-white/5 group hover:bg-white/10 transition">
-                    <p className="text-[11px] font-black text-white mb-1 uppercase tracking-tight">{log.action}</p>
-                    <p className="text-[9px] text-slate-500 font-bold leading-relaxed">{log.target} • {log.performedBy}</p>
-                    <p className="text-[8px] text-slate-600 mt-2 font-mono uppercase">{log.timestamp}</p>
-                  </div>
-                )) : (
-                  <div className="py-20 text-center text-slate-600 font-bold uppercase text-[10px] tracking-widest">Awaiting system events...</div>
-                )}
-              </div>
-              <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-emerald-600/10 rounded-full blur-3xl"></div>
-          </section>
+      <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-xl shadow-slate-200/20">
+        <div className="flex space-x-8 border-b border-slate-50 mb-10">
+          <button onClick={() => setActiveTab('users')} className={`pb-6 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'users' ? 'text-emerald-600 border-b-2 border-emerald-600' : 'text-slate-400'}`}>Clinical Registry</button>
+          <button onClick={() => setActiveTab('sync')} className={`pb-6 text-[10px] font-black uppercase tracking-widest transition-all relative ${activeTab === 'sync' ? 'text-emerald-600 border-b-2 border-emerald-600' : 'text-slate-400'}`}>
+            Sync Authorizations
+            {syncRequests.filter(r => r.status === 'pending').length > 0 && <span className="absolute top-0 -right-2 w-2 h-2 bg-amber-500 rounded-full"></span>}
+          </button>
         </div>
+
+        {activeTab === 'users' ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[9px] font-black text-slate-300 uppercase tracking-widest border-b border-slate-50">
+                  <th className="pb-4">Clinical Identity</th>
+                  <th className="pb-4">Role</th>
+                  <th className="pb-4">Status</th>
+                  <th className="pb-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {allUsers.map(u => (
+                  <tr key={u.id}>
+                    <td className="py-6">
+                      <div className="flex items-center space-x-4">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-white ${u.role === UserRole.ADMIN ? 'bg-slate-900' : 'bg-emerald-600'}`}>{u.name.charAt(0)}</div>
+                        <div><p className="text-sm font-black text-slate-900">{u.name}</p><p className="text-[10px] text-slate-400 font-bold">{u.email}</p></div>
+                      </div>
+                    </td>
+                    <td className="py-6"><span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg ${u.role === UserRole.ADMIN ? 'bg-slate-900 text-white' : 'bg-emerald-50 text-emerald-600'}`}>{u.role}</span></td>
+                    <td className="py-6"><span className={`text-[9px] font-black uppercase tracking-widest ${u.isApproved ? 'text-emerald-600' : 'text-amber-500'}`}>{u.isApproved ? 'Verified' : 'Pending'}</span></td>
+                    <td className="py-6 text-right">
+                      {u.role === UserRole.CONSULTANT && !u.isApproved && (
+                        <button onClick={() => handleApproveDoctor(u.id)} className="px-4 py-2 bg-emerald-600 text-white text-[9px] font-black uppercase tracking-widest rounded-xl mr-2">Approve</button>
+                      )}
+                      <select onChange={(e) => handleUpdateRole(u.id, e.target.value as UserRole)} value={u.role} className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[9px] font-black uppercase tracking-widest outline-none">
+                        <option value={UserRole.PATIENT}>Patient</option>
+                        <option value={UserRole.CONSULTANT}>Consultant</option>
+                        <option value={UserRole.ADMIN}>Admin</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {syncRequests.length > 0 ? syncRequests.map(req => (
+              <div key={req.id} className="p-8 bg-slate-50 border border-slate-100 rounded-[2.5rem] flex flex-col md:flex-row justify-between items-center gap-6">
+                <div className="flex items-center space-x-6">
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white ${req.status === 'approved' ? 'bg-emerald-600' : req.status === 'rejected' ? 'bg-red-500' : 'bg-amber-500'}`}>
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" /></svg>
+                  </div>
+                  <div>
+                    <h4 className="text-lg font-black text-slate-900 tracking-tight">Sync Authorization: {req.requesterEmail}</h4>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{req.deviceInfo} • {new Date(req.timestamp).toLocaleString()}</p>
+                  </div>
+                </div>
+                <div className="flex space-x-3">
+                  {req.status === 'pending' ? (
+                    <>
+                      <button onClick={() => handleUpdateSyncStatus(req.id, 'approved')} className="px-8 py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-100">Authorize Sync</button>
+                      <button onClick={() => handleUpdateSyncStatus(req.id, 'rejected')} className="px-8 py-4 bg-red-50 text-red-500 border border-red-100 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition">Reject</button>
+                    </>
+                  ) : (
+                    <span className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${req.status === 'approved' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-red-50 text-red-600 border border-red-100'}`}>
+                      {req.status === 'approved' ? 'Authorization Granted' : 'Rejected'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )) : (
+              <div className="py-20 text-center text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">No pending device sync requests.</div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Onboarding Modal */}
       {isOnboardOpen && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsOnboardOpen(false)}></div>
           <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10">
             <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Direct Clinical Onboarding</h3>
             <form onSubmit={handleOnboardSubmit} className="space-y-6">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Legal Name</label>
-                <input 
-                  required
-                  placeholder="e.g. Dr. Ada Lovelace" 
-                  value={onboardForm.name}
-                  onChange={(e) => setOnboardForm({...onboardForm, name: e.target.value})}
-                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" 
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Clinical Identifier (Email)</label>
-                <input 
-                  required
-                  type="email"
-                  placeholder="staff@byinkshealth.com" 
-                  value={onboardForm.email}
-                  onChange={(e) => setOnboardForm({...onboardForm, email: e.target.value})}
-                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" 
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">System Role</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    type="button" 
-                    onClick={() => setOnboardForm({...onboardForm, role: UserRole.CONSULTANT})}
-                    className={`py-3 text-[10px] font-black rounded-xl transition uppercase tracking-widest ${onboardForm.role === UserRole.CONSULTANT ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-100' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}
-                  >
-                    Specialist
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => setOnboardForm({...onboardForm, role: UserRole.ADMIN})}
-                    className={`py-3 text-[10px] font-black rounded-xl transition uppercase tracking-widest ${onboardForm.role === UserRole.ADMIN ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}
-                  >
-                    Administrator
-                  </button>
-                </div>
+              <input required placeholder="Name" value={onboardForm.name} onChange={(e) => setOnboardForm({...onboardForm, name: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" />
+              <input required type="email" placeholder="Email Identifier" value={onboardForm.email} onChange={(e) => setOnboardForm({...onboardForm, email: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" />
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" onClick={() => setOnboardForm({...onboardForm, role: UserRole.CONSULTANT})} className={`py-3 text-[10px] font-black rounded-xl transition ${onboardForm.role === UserRole.CONSULTANT ? 'bg-emerald-600 text-white' : 'bg-slate-50 text-slate-400'}`}>Specialist</button>
+                <button type="button" onClick={() => setOnboardForm({...onboardForm, role: UserRole.ADMIN})} className={`py-3 text-[10px] font-black rounded-xl transition ${onboardForm.role === UserRole.ADMIN ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400'}`}>Administrator</button>
               </div>
               {onboardForm.role === UserRole.CONSULTANT && (
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Medical Specialty</label>
-                  <input 
-                    required
-                    placeholder="e.g. Cardiology" 
-                    value={onboardForm.specialty}
-                    onChange={(e) => setOnboardForm({...onboardForm, specialty: e.target.value})}
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" 
-                  />
-                </div>
+                <input required placeholder="Specialty" value={onboardForm.specialty} onChange={(e) => setOnboardForm({...onboardForm, specialty: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" />
               )}
-              <button type="submit" className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition shadow-xl shadow-emerald-100">
-                Authorize System Entry
-              </button>
+              <button type="submit" className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition">Authorize System Entry</button>
             </form>
           </div>
         </div>
