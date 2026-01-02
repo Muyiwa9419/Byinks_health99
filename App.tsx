@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { User, UserRole } from './types';
-import Landing from './pages/Landing';
+import HospitalHome from './pages/HospitalHome';
 import Login from './pages/Login';
 import PatientDashboard from './pages/PatientDashboard';
 import PatientProfile from './pages/PatientProfile';
@@ -58,11 +58,9 @@ const App: React.FC = () => {
   };
 
   const handleUpdateUser = (updatedUser: User) => {
-    // 1. Update the current session user
     setUser(updatedUser);
     localStorage.setItem('medi_user', JSON.stringify(updatedUser));
 
-    // 2. Update the user in the global registered users list
     const storedUsers: User[] = JSON.parse(localStorage.getItem('medi_registered_users') || '[]');
     const updatedUsers = storedUsers.map(u => u.id === updatedUser.id ? updatedUser : u);
     localStorage.setItem('medi_registered_users', JSON.stringify(updatedUsers));
@@ -74,7 +72,7 @@ const App: React.FC = () => {
         <Navbar user={user} onLogout={handleLogout} />
         <main className="flex-grow">
           <Routes>
-            <Route path="/" element={<Landing />} />
+            <Route path="/" element={<HospitalHome />} />
             <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login onLogin={handleLogin} />} />
             <Route 
               path="/dashboard" 
