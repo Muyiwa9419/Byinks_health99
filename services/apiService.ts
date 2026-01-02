@@ -22,20 +22,25 @@ const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getI
 /**
  * Enhanced Save: Updates local storage and broadcasts to Clinical Cloud for cross-device sync
  */
-const saveLocalCollection = <T>(key: string, data: T[]) => {
-  const fullKey = `medi_${key}`;
+const saveLocalCollection = (key: string, data: any) => {
+  const fullKey = key.startsWith('medi_') || key.startsWith('chat_') ? key : `medi_${key}`;
   localStorage.setItem(fullKey, JSON.stringify(data));
   
-  // Cross-tab sync
+  // Cross-tab sync (Same Device)
   clinicalBridge.postMessage({ type: 'REFRESH_COLLECTION', key: fullKey });
   window.dispatchEvent(new Event('storage'));
   
-  // Cross-device sync (Cloud Broadcast)
+  // Cross-device sync (Global Cloud Broadcast)
   if (supabase) {
-    supabase.channel('global_clinical_system').send({
-      type: 'broadcast',
-      event: 'system_update',
-      payload: { type: 'COLLECTION_UPDATE', data: { key: fullKey, data }, timestamp: Date.now() },
+    const channel = supabase.channel('global_clinical_system');
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        channel.send({
+          type: 'broadcast',
+          event: 'system_update',
+          payload: { type: 'COLLECTION_UPDATE', data: { key: fullKey, data }, timestamp: Date.now() },
+        });
+      }
     });
   }
 };
@@ -58,31 +63,28 @@ export const ClinicalAPI = {
       .subscribe();
   },
 
-  broadcastSystemEvent(type: string, data: any) {
-    if (supabase) {
-      supabase.channel('global_clinical_system').send({
-        type: 'broadcast',
-        event: 'system_update',
-        payload: { type, data, timestamp: Date.now() },
-      });
-    }
-  },
-
   subscribeToClinicalCloud(chatId: string, onMessage: (msg: any) => void): RealtimeChannel | null {
     if (!supabase) return null;
-    return supabase.channel(`chat:${chatId}`)
+    // Use a unique channel for this specific conversation
+    return supabase.channel(`clinical_chat_${chatId}`)
       .on('broadcast', { event: 'new_message' }, ({ payload }) => {
         onMessage(payload);
       })
       .subscribe();
   },
 
-  broadcastMessage(chatId: string, message: any) {
+  async broadcastMessage(chatId: string, message: any) {
     if (supabase) {
-      supabase.channel(`chat:${chatId}`).send({
-        type: 'broadcast',
-        event: 'new_message',
-        payload: message,
+      const channel = supabase.channel(`clinical_chat_${chatId}`);
+      // Ensure we wait for subscription before sending to avoid "lost" messages
+      channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.send({
+            type: 'broadcast',
+            event: 'new_message',
+            payload: message,
+          });
+        }
       });
     }
   },
