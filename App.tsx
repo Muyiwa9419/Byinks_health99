@@ -1,17 +1,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { User, UserRole, Appointment, AppNotification } from './types';
-import HospitalHome from './pages/HospitalHome';
-import Login from './pages/Login';
-import PatientDashboard from './pages/PatientDashboard';
-import PatientProfile from './pages/PatientProfile';
-import ConsultantDashboard from './pages/ConsultantDashboard';
-import AdminDashboard from './pages/AdminDashboard';
-import FindDoctor from './pages/FindDoctor';
-import Services from './pages/Services';
-import Contact from './pages/Contact';
-import Navbar from './components/Navbar';
+import { User, UserRole, Appointment, AppNotification } from './types.ts';
+import HospitalHome from './pages/HospitalHome.tsx';
+import Login from './pages/Login.tsx';
+import PatientDashboard from './pages/PatientDashboard.tsx';
+import PatientProfile from './pages/PatientProfile.tsx';
+import ConsultantDashboard from './pages/ConsultantDashboard.tsx';
+import AdminDashboard from './pages/AdminDashboard.tsx';
+import FindDoctor from './pages/FindDoctor.tsx';
+import Services from './pages/Services.tsx';
+import Contact from './pages/Contact.tsx';
+import Navbar from './components/Navbar.tsx';
 
 const Toast: React.FC<{ notification: AppNotification; onClose: () => void }> = ({ notification, onClose }) => (
   <div className="fixed top-24 right-6 z-[300] w-80 bg-white rounded-[2rem] border-2 border-emerald-100 shadow-2xl p-6 animate-in slide-in-from-right-8 fade-in duration-500">

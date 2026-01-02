@@ -1,12 +1,23 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize GoogleGenAI directly using the environment variable as per guidelines.
-// Coding Guideline: Always use process.env.API_KEY directly for initialization.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize GoogleGenAI lazily or with a safety check to prevent top-level boot errors
+const getAI = () => {
+  try {
+    const key = process.env.API_KEY;
+    if (!key) return null;
+    return new GoogleGenAI({ apiKey: key });
+  } catch (e) {
+    console.error("MediSphere AI Init Error:", e);
+    return null;
+  }
+};
+
+const ai = getAI();
 
 export const analyzeSymptoms = async (symptoms: string) => {
-  // Use gemini-3-pro-preview for complex text tasks such as symptom analysis.
+  if (!ai) return "AI medical analysis is currently offline. Please consult a clinician directly.";
+  
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
     contents: `Analyze the following symptoms and provide a potential health assessment. 
@@ -18,12 +29,12 @@ export const analyzeSymptoms = async (symptoms: string) => {
       thinkingConfig: { thinkingBudget: 250 },
     },
   });
-  // Coding Guideline: Access the generated text directly through the .text property.
-  return response.text || "AI services are currently unavailable. Please consult a doctor immediately.";
+  return response.text || "Diagnostic analysis returned no results.";
 };
 
 export const summarizePatientHistory = async (history: string) => {
-  // Use gemini-3-flash-preview for basic text tasks like medical history summarization.
+  if (!ai) return "AI Synthesis offline.";
+  
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `Summarize this patient's medical history for a busy consultant. 
@@ -33,13 +44,12 @@ export const summarizePatientHistory = async (history: string) => {
       temperature: 0.2,
     },
   });
-  // Coding Guideline: Access the generated text directly through the .text property.
-  return response.text || "Unable to generate summary at this time.";
+  return response.text || "Summary generation failed.";
 };
 
 export const getHealthTips = async () => {
+  if (!ai) return [];
   try {
-    // Generate content using a responseSchema to ensure structured JSON output.
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: "Generate 3 personalized daily health tips for a patient to improve their well-being.",
@@ -60,11 +70,10 @@ export const getHealthTips = async () => {
         }
       }
     });
-    // Coding Guideline: response.text is a property, use .trim() for clean parsing.
     const jsonStr = response.text?.trim();
     return JSON.parse(jsonStr || "[]");
   } catch (e) {
-    console.error("MediSphere Gemini Error:", e);
+    console.error("MediSphere Health Tips Error:", e);
     return [];
   }
 };
