@@ -44,6 +44,27 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     return Math.max(0, EXPIRATION_THRESHOLD - elapsed);
   };
 
+  const handleIncomingMessage = (incomingMsg: any) => {
+    // Check if it's a "Session Ended" signal
+    if (incomingMsg.type === 'SESSION_ENDED') {
+      localStorage.removeItem(storageKey);
+      setMessages([]);
+      if (isOpen) onClose();
+      return;
+    }
+
+    setMessages(prev => {
+      if (prev.find(m => m.id === incomingMsg.id)) return prev;
+      const newSet = [...prev, incomingMsg].sort((a, b) => a.timestamp - b.timestamp);
+      localStorage.setItem(storageKey, JSON.stringify(newSet));
+      
+      // Update local countdown on any activity
+      setTimeLeft(EXPIRATION_THRESHOLD);
+      setIsExpired(false);
+      return newSet;
+    });
+  };
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -59,27 +80,25 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     if (!ClinicalAPI.isConfigured()) {
       setRelayStatus('unavailable');
     } else {
-      channel = ClinicalAPI.subscribeToClinicalCloud(chatId, (incomingMsg: Message) => {
-        setMessages(prev => {
-          if (prev.find(m => m.id === incomingMsg.id)) return prev;
-          const newSet = [...prev, incomingMsg].sort((a, b) => a.timestamp - b.timestamp);
-          localStorage.setItem(storageKey, JSON.stringify(newSet));
-          setTimeLeft(EXPIRATION_THRESHOLD); // Reset local timer on incoming message
-          setIsExpired(false);
-          return newSet;
-        });
-      });
-      
-      if (channel) {
-        setRelayStatus('active');
-      }
+      channel = ClinicalAPI.subscribeToClinicalCloud(chatId, handleIncomingMessage);
+      if (channel) setRelayStatus('active');
     }
 
-    // 3. Setup Tab Relay (BroadcastChannel fallback)
+    // 3. Setup Local Bridge (BroadcastChannel)
+    const bridge = ClinicalAPI.getBridge();
+    const handleBridge = (e: MessageEvent) => {
+      if (e.data.type === 'CHAT_MESSAGE' && e.data.chatId === chatId) {
+        handleIncomingMessage(e.data.message);
+      } else if (e.data.type === 'CHAT_CLOSED' && e.data.chatId === chatId) {
+        setMessages([]);
+        if (isOpen) onClose();
+      }
+    };
+
+    // 4. Setup Storage Event (Cross-Tab sync for direct localStorage edits)
     const handleStorageChange = () => {
       const stored = localStorage.getItem(storageKey);
       if (stored === null) {
-        // If data was cleared by another tab
         setMessages([]);
         if (isOpen) onClose();
         return;
@@ -91,8 +110,11 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       setIsExpired(remaining <= 0);
     };
 
+    bridge.addEventListener('message', handleBridge);
     window.addEventListener('storage', handleStorageChange);
+    
     return () => {
+      bridge.removeEventListener('message', handleBridge);
       window.removeEventListener('storage', handleStorageChange);
       channel?.unsubscribe();
     };
@@ -136,13 +158,15 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     const updatedMessages = [...messages, newMessage];
     setMessages(updatedMessages);
     localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
+    
+    // Broadcast locally to other tabs immediately
     window.dispatchEvent(new Event('storage'));
     
     // Reset Timer locally
     setTimeLeft(EXPIRATION_THRESHOLD);
     setIsExpired(false);
     
-    // Broadcast to Relay (Cross-Device)
+    // Broadcast to Relay (Cross-Device & Cross-Tab)
     await ClinicalAPI.broadcastMessage(chatId, newMessage);
     
     if (!customMsg) setInputText('');
@@ -155,12 +179,15 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     });
   };
 
-  const handleEndSession = () => {
+  const handleEndSession = async () => {
     if (messages.length > 0 && !isExpired) {
       if (!confirm("Clinical Protocol: Ending this session will permanently clear the dialogue history from this device for security. Proceed?")) {
         return;
       }
     }
+    
+    // Broadcast end session to remote participants and local tabs
+    await ClinicalAPI.broadcastEndSession(chatId);
     
     // Purge local storage
     localStorage.removeItem(storageKey);
@@ -168,7 +195,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     setIsExpired(false);
     setTimeLeft(null);
     
-    // Broadcast change to other tabs
+    // Notify local environment
     window.dispatchEvent(new Event('storage'));
     
     // Close overlay

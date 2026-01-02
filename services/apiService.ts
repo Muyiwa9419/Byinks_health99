@@ -6,13 +6,10 @@ import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest 
  * ==========================================
  * CLOUD RELAY CONFIGURATION
  * ==========================================
- * The app reads these from your .env file or environment variables.
- * Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.
  */
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-// Internal Logic
 export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY) 
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
@@ -22,24 +19,20 @@ const activeChannels = new Map<string, RealtimeChannel>();
 
 const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getItem(`medi_${key}`) || '[]');
 
-/**
- * Centralized Save Utility
- * Syncs LocalStorage for immediate UI response and broadcasts to Supabase for cross-device relay.
- */
 const saveLocalCollection = (key: string, data: any) => {
   const fullKey = key.startsWith('medi_') || key.startsWith('chat_') ? key : `medi_${key}`;
   localStorage.setItem(fullKey, JSON.stringify(data));
   
-  // 1. Same-Device Broadcast (Other tabs on current browser)
-  clinicalBridge.postMessage({ type: 'REFRESH_COLLECTION', key: fullKey });
+  // 1. Same-Device Broadcast
+  clinicalBridge.postMessage({ type: 'COLLECTION_UPDATE', key: fullKey, data });
   window.dispatchEvent(new Event('storage'));
   
-  // 2. Cross-Device Relay (Supabase Cloud)
+  // 2. Cross-Device Relay
   if (supabase) {
-    const globalChannel = supabase.channel('system_relay');
-    globalChannel.subscribe((status) => {
+    const systemChannel = supabase.channel('system_relay');
+    systemChannel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        globalChannel.send({
+        systemChannel.send({
           type: 'broadcast',
           event: 'system_update',
           payload: { type: 'COLLECTION_UPDATE', data: { key: fullKey, data }, timestamp: Date.now() },
@@ -68,6 +61,7 @@ export const ClinicalAPI = {
   subscribeToClinicalCloud(chatId: string, onMessage: (msg: any) => void): RealtimeChannel | null {
     if (!supabase) return null;
     
+    // Cleanup old channel if exists
     if (activeChannels.has(chatId)) {
       activeChannels.get(chatId)?.unsubscribe();
     }
@@ -76,7 +70,12 @@ export const ClinicalAPI = {
       .on('broadcast', { event: 'new_message' }, ({ payload }) => {
         onMessage(payload);
       })
-      .subscribe();
+      .on('broadcast', { event: 'session_ended' }, () => {
+        onMessage({ type: 'SESSION_ENDED' });
+      })
+      .subscribe((status) => {
+        console.debug(`Supabase Channel [${chatId}] Status:`, status);
+      });
     
     activeChannels.set(chatId, channel);
     return channel;
@@ -84,17 +83,36 @@ export const ClinicalAPI = {
 
   async broadcastMessage(chatId: string, message: any) {
     if (supabase) {
-      const channel = activeChannels.get(chatId) || supabase.channel(`relay_chat_${chatId}`);
-      channel.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.send({
-            type: 'broadcast',
-            event: 'new_message',
-            payload: message,
-          });
-        }
+      let channel = activeChannels.get(chatId);
+      if (!channel) {
+        channel = supabase.channel(`relay_chat_${chatId}`).subscribe();
+        activeChannels.set(chatId, channel);
+      }
+      
+      // Ensure we only send once channel is ready
+      await channel.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: message,
       });
     }
+    
+    // Local bridge relay for other tabs
+    clinicalBridge.postMessage({ type: 'CHAT_MESSAGE', chatId, message });
+  },
+
+  async broadcastEndSession(chatId: string) {
+    if (supabase) {
+      const channel = activeChannels.get(chatId);
+      if (channel) {
+        await channel.send({
+          type: 'broadcast',
+          event: 'session_ended',
+          payload: { timestamp: Date.now() }
+        });
+      }
+    }
+    clinicalBridge.postMessage({ type: 'CHAT_CLOSED', chatId });
   },
 
   async saveAppointments(apps: Appointment[]) { saveLocalCollection('appointments', apps); },
