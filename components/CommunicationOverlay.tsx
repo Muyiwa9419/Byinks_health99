@@ -77,7 +77,14 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
 
     // 3. Setup Tab Relay (BroadcastChannel fallback)
     const handleStorageChange = () => {
-      const updated = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const stored = localStorage.getItem(storageKey);
+      if (stored === null) {
+        // If data was cleared by another tab
+        setMessages([]);
+        if (isOpen) onClose();
+        return;
+      }
+      const updated = JSON.parse(stored || '[]');
       setMessages(updated);
       const remaining = getRemainingTime(updated);
       setTimeLeft(remaining);
@@ -148,6 +155,26 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     });
   };
 
+  const handleEndSession = () => {
+    if (messages.length > 0 && !isExpired) {
+      if (!confirm("Clinical Protocol: Ending this session will permanently clear the dialogue history from this device for security. Proceed?")) {
+        return;
+      }
+    }
+    
+    // Purge local storage
+    localStorage.removeItem(storageKey);
+    setMessages([]);
+    setIsExpired(false);
+    setTimeLeft(null);
+    
+    // Broadcast change to other tabs
+    window.dispatchEvent(new Event('storage'));
+    
+    // Close overlay
+    onClose();
+  };
+
   const formatTimeLeft = (ms: number) => {
     const mins = Math.floor(ms / 60000);
     const secs = Math.floor((ms % 60000) / 1000);
@@ -191,9 +218,19 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
               </div>
             </div>
           </div>
-          <button onClick={onClose} className="p-4 bg-slate-50 text-slate-400 hover:text-red-500 rounded-2xl transition-all">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={handleEndSession}
+              title="End & Clear Clinical Session"
+              className="flex items-center space-x-2 px-6 py-4 bg-slate-50 text-slate-900 rounded-2xl font-black text-[9px] uppercase tracking-widest hover:bg-red-50 hover:text-red-600 transition-all border border-slate-100"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              <span>Finish Session</span>
+            </button>
+            <button onClick={onClose} className="p-4 bg-slate-50 text-slate-400 hover:text-slate-900 rounded-2xl transition-all border border-slate-100">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
         </div>
 
         {/* Security Banners */}
@@ -241,12 +278,20 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                  </div>
                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-2">Session Locked</h4>
                  <p className="text-[10px] text-slate-500 font-bold leading-relaxed mb-6">To ensure medical confidentiality, this interaction hub has been locked due to 10 minutes of inactivity.</p>
-                 <button 
-                  onClick={handleRestartSession}
-                  className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition active:scale-95"
-                 >
-                   Resume Secure Session
-                 </button>
+                 <div className="space-y-3">
+                   <button 
+                    onClick={handleRestartSession}
+                    className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition active:scale-95"
+                   >
+                     Resume Secure Session
+                   </button>
+                   <button 
+                    onClick={handleEndSession}
+                    className="w-full py-4 bg-white text-slate-400 border border-slate-100 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:text-red-500 hover:border-red-100 transition active:scale-95"
+                   >
+                     Clear & Close Session
+                   </button>
+                 </div>
               </div>
             </div>
           )}
