@@ -1,8 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { User, UserRole, AppNotification } from '../types.ts';
-import { summarizePatientHistory } from '../services/geminiService.ts';
 import { ClinicalAPI } from '../services/apiService.ts';
+import { User, UserRole } from '../types.ts';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface Message {
   senderId: string;
@@ -11,6 +10,7 @@ interface Message {
   time: string;
   timestamp: number;
   id: string;
+  isSystem?: boolean;
 }
 
 interface CommunicationOverlayProps {
@@ -112,17 +112,18 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputText.trim() || isExpired) return;
+  const handleSend = async (e?: React.FormEvent, customMsg?: Partial<Message>) => {
+    if (e) e.preventDefault();
+    if (!customMsg && (!inputText.trim() || isExpired)) return;
 
     const newMessage: Message = {
       id: Math.random().toString(36).substr(2, 9),
       senderId: currentUser.id,
       senderName: currentUser.name,
-      text: inputText.trim(),
+      text: customMsg?.text || inputText.trim(),
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      ...customMsg
     };
 
     const updatedMessages = [...messages, newMessage];
@@ -137,7 +138,14 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     // Broadcast to Relay (Cross-Device)
     await ClinicalAPI.broadcastMessage(chatId, newMessage);
     
-    setInputText('');
+    if (!customMsg) setInputText('');
+  };
+
+  const handleRestartSession = async () => {
+    await handleSend(undefined, {
+      text: `Clinical Session Re-authorized by ${currentUser.name}`,
+      isSystem: true
+    });
   };
 
   const formatTimeLeft = (ms: number) => {
@@ -196,35 +204,49 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
         )}
         {isExpired && (
           <div className="bg-red-600 text-white px-8 py-3 text-center text-[10px] font-black uppercase tracking-widest animate-in slide-in-from-top-full">
-            Clinical Hazard: This session has been locked for your protection. Please refresh to authorize a new session.
+            Clinical Hazard: This session has been locked for your protection.
           </div>
         )}
 
         {/* Message Stream */}
         <div className="flex-grow overflow-y-auto p-8 space-y-8 custom-scrollbar bg-slate-50/20">
           {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-              <div className={`max-w-[75%] p-6 rounded-[2rem] shadow-sm border ${
-                msg.senderId === currentUser.id 
-                  ? 'bg-slate-900 text-white border-slate-800 rounded-tr-none' 
-                  : 'bg-white text-slate-800 border-slate-100 rounded-tl-none'
-              }`}>
-                <div className="flex items-center justify-between mb-2 opacity-50">
-                  <span className="text-[9px] font-black uppercase tracking-widest">{msg.senderName}</span>
-                  <span className="text-[9px] font-bold">{msg.time}</span>
-                </div>
-                <p className="text-sm font-medium leading-relaxed">{msg.text}</p>
+            msg.isSystem ? (
+              <div key={msg.id} className="flex justify-center my-6">
+                <span className="px-6 py-2 bg-slate-100 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest border border-slate-200">
+                  {msg.text} • {msg.time}
+                </span>
               </div>
-            </div>
+            ) : (
+              <div key={msg.id} className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
+                <div className={`max-w-[75%] p-6 rounded-[2rem] shadow-sm border ${
+                  msg.senderId === currentUser.id 
+                    ? 'bg-slate-900 text-white border-slate-800 rounded-tr-none' 
+                    : 'bg-white text-slate-800 border-slate-100 rounded-tl-none'
+                }`}>
+                  <div className="flex items-center justify-between mb-2 opacity-50">
+                    <span className="text-[9px] font-black uppercase tracking-widest">{msg.senderName}</span>
+                    <span className="text-[9px] font-bold">{msg.time}</span>
+                  </div>
+                  <p className="text-sm font-medium leading-relaxed">{msg.text}</p>
+                </div>
+              </div>
+            )
           ))}
           {isExpired && (
             <div className="flex justify-center py-10">
-              <div className="bg-white border-2 border-red-100 p-8 rounded-[2rem] text-center max-w-sm shadow-xl">
+              <div className="bg-white border-2 border-red-100 p-8 rounded-[2rem] text-center max-w-sm shadow-xl animate-in zoom-in-95">
                  <div className="w-12 h-12 bg-red-50 text-red-600 rounded-xl flex items-center justify-center mx-auto mb-4">
                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 15v2m0 0v2m0-2h2m-2 0H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                  </div>
-                 <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-2">Session Expired</h4>
-                 <p className="text-[10px] text-slate-500 font-bold leading-relaxed">To ensure medical confidentiality, this interaction hub has been locked due to 10 minutes of inactivity.</p>
+                 <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-2">Session Locked</h4>
+                 <p className="text-[10px] text-slate-500 font-bold leading-relaxed mb-6">To ensure medical confidentiality, this interaction hub has been locked due to 10 minutes of inactivity.</p>
+                 <button 
+                  onClick={handleRestartSession}
+                  className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition active:scale-95"
+                 >
+                   Resume Secure Session
+                 </button>
               </div>
             </div>
           )}
