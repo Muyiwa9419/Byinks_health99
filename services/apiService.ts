@@ -3,39 +3,43 @@ import { createClient, RealtimeChannel } from '@supabase/supabase-js';
 import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest } from '../types.ts';
 
 /**
- * Clinical Hybrid API Service
- * Primary: Supabase Cloud (Global Sync)
- * Fallback: Local Persisted Simulation (Same-Device Sync)
+ * ==========================================
+ * CLOUD RELAY CONFIGURATION
+ * ==========================================
+ * The app reads these from your .env file or environment variables.
+ * Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set.
  */
-
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
+// Internal Logic
 export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY) 
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
 
 const clinicalBridge = new BroadcastChannel('medi_clinical_bridge');
+const activeChannels = new Map<string, RealtimeChannel>();
 
 const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getItem(`medi_${key}`) || '[]');
 
 /**
- * Enhanced Save: Updates local storage and broadcasts to Clinical Cloud for cross-device sync
+ * Centralized Save Utility
+ * Syncs LocalStorage for immediate UI response and broadcasts to Supabase for cross-device relay.
  */
 const saveLocalCollection = (key: string, data: any) => {
   const fullKey = key.startsWith('medi_') || key.startsWith('chat_') ? key : `medi_${key}`;
   localStorage.setItem(fullKey, JSON.stringify(data));
   
-  // Cross-tab sync (Same Device)
+  // 1. Same-Device Broadcast (Other tabs on current browser)
   clinicalBridge.postMessage({ type: 'REFRESH_COLLECTION', key: fullKey });
   window.dispatchEvent(new Event('storage'));
   
-  // Cross-device sync (Global Cloud Broadcast)
+  // 2. Cross-Device Relay (Supabase Cloud)
   if (supabase) {
-    const channel = supabase.channel('global_clinical_system');
-    channel.subscribe((status) => {
+    const globalChannel = supabase.channel('system_relay');
+    globalChannel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        channel.send({
+        globalChannel.send({
           type: 'broadcast',
           event: 'system_update',
           payload: { type: 'COLLECTION_UPDATE', data: { key: fullKey, data }, timestamp: Date.now() },
@@ -56,27 +60,31 @@ export const ClinicalAPI = {
 
   subscribeToGlobalSystem(onEvent: (payload: any) => void): RealtimeChannel | null {
     if (!supabase) return null;
-    return supabase.channel('global_clinical_system')
-      .on('broadcast', { event: 'system_update' }, ({ payload }) => {
-        onEvent(payload);
-      })
+    return supabase.channel('system_relay')
+      .on('broadcast', { event: 'system_update' }, ({ payload }) => onEvent(payload))
       .subscribe();
   },
 
   subscribeToClinicalCloud(chatId: string, onMessage: (msg: any) => void): RealtimeChannel | null {
     if (!supabase) return null;
-    // Use a unique channel for this specific conversation
-    return supabase.channel(`clinical_chat_${chatId}`)
+    
+    if (activeChannels.has(chatId)) {
+      activeChannels.get(chatId)?.unsubscribe();
+    }
+
+    const channel = supabase.channel(`relay_chat_${chatId}`)
       .on('broadcast', { event: 'new_message' }, ({ payload }) => {
         onMessage(payload);
       })
       .subscribe();
+    
+    activeChannels.set(chatId, channel);
+    return channel;
   },
 
   async broadcastMessage(chatId: string, message: any) {
     if (supabase) {
-      const channel = supabase.channel(`clinical_chat_${chatId}`);
-      // Ensure we wait for subscription before sending to avoid "lost" messages
+      const channel = activeChannels.get(chatId) || supabase.channel(`relay_chat_${chatId}`);
       channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
           await channel.send({
@@ -89,21 +97,10 @@ export const ClinicalAPI = {
     }
   },
 
-  /**
-   * Data Specific Persistence Methods
-   */
-  async saveAppointments(apps: Appointment[]) {
-    saveLocalCollection('appointments', apps);
-  },
-
-  async saveNotifications(notifs: AppNotification[]) {
-    saveLocalCollection('notifications', notifs);
-  },
-
-  async saveUsers(users: User[]) {
-    saveLocalCollection('registered_users', users);
-  },
-
+  async saveAppointments(apps: Appointment[]) { saveLocalCollection('appointments', apps); },
+  async saveNotifications(notifs: AppNotification[]) { saveLocalCollection('notifications', notifs); },
+  async saveUsers(users: User[]) { saveLocalCollection('registered_users', users); },
+  
   async getProfile(userId: string): Promise<User | null> {
     const users = getLocalCollection<User>('registered_users');
     return users.find(u => u.id === userId) || null;
@@ -177,11 +174,11 @@ export const ClinicalAPI = {
   seedDefaultData() {
     const users = getLocalCollection<User>('registered_users');
     if (users.length === 0) {
-      const defaultDoctors: User[] = [
+      const defaultDocs: User[] = [
         { id: 'doc-1', name: 'Dr. Sarah Jenkins', email: 'sarah.j@byinkshealth.com', role: UserRole.CONSULTANT, specialty: 'Cardiology', isApproved: true },
         { id: 'admin-1', name: 'System Admin', email: 'admin@byinkshealth.com', role: UserRole.ADMIN, isApproved: true }
       ];
-      this.saveUsers(defaultDoctors);
+      this.saveUsers(defaultDocs);
     }
   },
 

@@ -25,16 +25,15 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
-  const [isCloudActive, setIsCloudActive] = useState(false);
+  const [relayStatus, setRelayStatus] = useState<'connecting' | 'active' | 'unavailable'>('connecting');
   const [isExpired, setIsExpired] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatId = [currentUser.id, targetUser.id].sort().join('--');
   const storageKey = `chat_${chatId}`;
 
-  const EXPIRATION_THRESHOLD = 24 * 60 * 60 * 1000; // 24 Hours
+  const EXPIRATION_THRESHOLD = 24 * 60 * 60 * 1000;
 
-  // Logic to calculate expiration based on message list
   const checkExpiration = (msgs: Message[]) => {
     if (msgs.length === 0) return false;
     const lastMsg = msgs[msgs.length - 1];
@@ -44,44 +43,40 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
-    // 1. Initial Load from Local Storage
+    // 1. Initial Load
     const initialMsgs = JSON.parse(localStorage.getItem(storageKey) || '[]');
     setMessages(initialMsgs);
     setIsExpired(checkExpiration(initialMsgs));
 
-    // 2. Setup Real-time Cloud Mirroring
-    const channel = ClinicalAPI.subscribeToClinicalCloud(chatId, (incomingMsg: Message) => {
-      setMessages(prev => {
-        // Prevent duplicate messages (id-based check)
-        if (prev.find(m => m.id === incomingMsg.id)) return prev;
-        
-        const newSet = [...prev, incomingMsg].sort((a, b) => a.timestamp - b.timestamp);
-        
-        // PERSIST IMMEDIATELY to local storage for other tabs
-        localStorage.setItem(storageKey, JSON.stringify(newSet));
-        window.dispatchEvent(new Event('storage'));
-        
-        setIsExpired(checkExpiration(newSet));
-        return newSet;
+    // 2. Setup Cloud Relay (Supabase Realtime)
+    if (!ClinicalAPI.isConfigured()) {
+      setRelayStatus('unavailable');
+    } else {
+      const channel = ClinicalAPI.subscribeToClinicalCloud(chatId, (incomingMsg: Message) => {
+        setMessages(prev => {
+          if (prev.find(m => m.id === incomingMsg.id)) return prev;
+          const newSet = [...prev, incomingMsg].sort((a, b) => a.timestamp - b.timestamp);
+          localStorage.setItem(storageKey, JSON.stringify(newSet));
+          setIsExpired(checkExpiration(newSet));
+          return newSet;
+        });
       });
-    });
-
-    if (channel) {
-      setIsCloudActive(true);
+      
+      if (channel) {
+        setRelayStatus('active');
+      }
     }
 
-    // 3. Listen for changes from other tabs on same device
-    const handleStorageChange = (e: StorageEvent | Event) => {
+    // 3. Setup Tab Relay (BroadcastChannel fallback)
+    const handleStorageChange = () => {
       const updated = JSON.parse(localStorage.getItem(storageKey) || '[]');
       setMessages(updated);
       setIsExpired(checkExpiration(updated));
     };
 
     window.addEventListener('storage', handleStorageChange);
-
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      channel?.unsubscribe();
     };
   }, [isOpen, chatId, storageKey]);
 
@@ -102,13 +97,12 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       timestamp: Date.now()
     };
 
-    // Update Local State
     const updatedMessages = [...messages, newMessage];
     setMessages(updatedMessages);
     localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
     window.dispatchEvent(new Event('storage'));
     
-    // Broadcast to Cloud (Cross-Device)
+    // Broadcast to Relay (Cross-Device)
     await ClinicalAPI.broadcastMessage(chatId, newMessage);
     
     setInputText('');
@@ -122,7 +116,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md" onClick={onClose}></div>
       <div className="relative w-full max-w-6xl h-full md:h-[90vh] bg-white md:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden border border-white/20">
         
-        {/* Real-time Status Header */}
+        {/* Relay Doctor Status Header */}
         <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-white/50 backdrop-blur-sm sticky top-0 z-10">
           <div className="flex items-center space-x-5">
             <div className="w-14 h-14 bg-emerald-600 rounded-[1.25rem] flex items-center justify-center text-white font-black text-2xl shadow-xl shadow-emerald-100">
@@ -130,14 +124,21 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
             </div>
             <div>
               <h2 className="text-2xl font-black text-slate-900 tracking-tight">{targetUser.name}</h2>
-              <div className="flex items-center space-x-3 mt-1">
-                <div className={`flex items-center text-[9px] font-black uppercase tracking-widest ${isCloudActive ? 'text-emerald-500' : 'text-slate-300'}`}>
-                  <span className={`w-2 h-2 rounded-full mr-2 ${isCloudActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></span>
-                  {isCloudActive ? 'Secure Cloud Link' : 'Connecting...'}
+              <div className="flex items-center space-x-4 mt-1">
+                <div className={`flex items-center text-[9px] font-black uppercase tracking-widest ${
+                  relayStatus === 'active' ? 'text-emerald-500' : 
+                  relayStatus === 'connecting' ? 'text-amber-500' : 'text-slate-300'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full mr-2 ${
+                    relayStatus === 'active' ? 'bg-emerald-500 animate-pulse' : 
+                    relayStatus === 'connecting' ? 'bg-amber-500 animate-bounce' : 'bg-slate-300'
+                  }`}></span>
+                  {relayStatus === 'active' ? 'Cross-Device Relay Active' : 
+                   relayStatus === 'connecting' ? 'Opening Bridge...' : 'Local Tab-Only Mode'}
                 </div>
-                {isExpired && (
-                  <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded text-[8px] font-black uppercase tracking-widest border border-red-100">
-                    Session Expired
+                {relayStatus === 'unavailable' && (
+                  <span className="text-[8px] font-bold text-slate-400 border border-slate-200 px-2 py-0.5 rounded uppercase">
+                    Requires API Keys for PC-to-Tablet Sync
                   </span>
                 )}
               </div>
@@ -150,15 +151,6 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
 
         {/* Message Stream */}
         <div className="flex-grow overflow-y-auto p-8 space-y-8 custom-scrollbar bg-slate-50/20">
-          {messages.length === 0 && (
-            <div className="py-20 text-center">
-              <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm border border-slate-100">
-                <svg className="w-8 h-8 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-              </div>
-              <p className="text-[10px] text-slate-300 font-black uppercase tracking-[0.2em]">Secure clinical thread initiated</p>
-            </div>
-          )}
-          
           {messages.map((msg) => (
             <div key={msg.id} className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
               <div className={`max-w-[75%] p-6 rounded-[2rem] shadow-sm border ${
@@ -177,34 +169,28 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input Control Area */}
+        {/* Input Area */}
         <div className="p-8 border-t border-slate-50 bg-white">
-          {isExpired ? (
-            <div className="bg-red-50/50 border-2 border-dashed border-red-100 p-8 rounded-[2.5rem] text-center">
-              <p className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-2">Protocol Lockdown: Session Inactive</p>
-              <p className="text-xs text-slate-500 font-bold leading-relaxed">
-                No activity detected for 24 hours. This thread has been closed for medical safety. <br />
-                Please schedule a new appointment to re-open the communication line.
-              </p>
-            </div>
-          ) : (
-            <form onSubmit={handleSend} className="flex items-center space-x-4">
-              <div className="flex-grow relative group">
-                <input 
-                  value={inputText} 
-                  onChange={(e) => setInputText(e.target.value)} 
-                  placeholder="Type secure clinical message..." 
-                  className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-[1.75rem] font-bold text-sm outline-none focus:border-emerald-600 focus:bg-white transition-all shadow-inner" 
-                />
-              </div>
-              <button 
-                type="submit" 
-                disabled={!inputText.trim()}
-                className="p-5 bg-emerald-600 text-white rounded-2xl shadow-xl active:scale-95 hover:bg-emerald-700 transition-all shadow-emerald-100 disabled:opacity-50 disabled:grayscale"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-              </button>
-            </form>
+          <form onSubmit={handleSend} className="flex items-center space-x-4">
+            <input 
+              value={inputText} 
+              onChange={(e) => setInputText(e.target.value)} 
+              disabled={isExpired}
+              placeholder={isExpired ? "Session Locked" : "Type secure clinical message..."} 
+              className="flex-grow px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-[1.75rem] font-bold text-sm outline-none focus:border-emerald-600 focus:bg-white transition-all shadow-inner disabled:opacity-50" 
+            />
+            <button 
+              type="submit" 
+              disabled={!inputText.trim() || isExpired}
+              className="p-5 bg-emerald-600 text-white rounded-2xl shadow-xl hover:bg-emerald-700 transition-all disabled:opacity-50"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+            </button>
+          </form>
+          {relayStatus === 'unavailable' && (
+            <p className="mt-4 text-[9px] font-bold text-slate-400 text-center uppercase tracking-widest italic">
+              Note: Messages will not appear on other devices without a configured Cloud Relay.
+            </p>
           )}
         </div>
       </div>
