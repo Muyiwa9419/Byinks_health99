@@ -217,7 +217,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-6">
         <div>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Clinical Workspace</h1>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Welcome, Dr. {user.name.split(' ')[0]}</h1>
           <div className="flex items-center mt-2 space-x-3">
             <span className="px-4 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-100">
               {user.specialty || 'Medical Specialist'}
