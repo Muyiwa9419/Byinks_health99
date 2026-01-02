@@ -181,4 +181,54 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
           <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10 overflow-hidden" ref={syncRef}>
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 blur-2xl opacity-50"></div>
             <h3 className="text-2xl font-black text-slate-900 mb-2 relative z-10">Clinical Cloud Integration</h3>
-            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8
+            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8 relative z-10">Seamless Identity Mobility</p>
+            
+            <div className="space-y-8 relative z-10">
+              <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Cloud Recovery Protocol</h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Clinical Identity (Email)</label>
+                    <input 
+                      type="email" 
+                      value={syncEmail} 
+                      onChange={(e) => setSyncEmail(e.target.value)} 
+                      placeholder="e.g. patient@example.com" 
+                      className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-emerald-600 shadow-sm" 
+                    />
+                  </div>
+                  <button 
+                    onClick={handleCloudRestore} 
+                    disabled={isSyncing}
+                    className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-600 transition shadow-xl disabled:opacity-50 flex items-center justify-center"
+                  >
+                    {isSyncing ? (
+                      <svg className="animate-spin h-4 w-4 mr-3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" fill="none"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" className="opacity-75" fill="none"></path></svg>
+                    ) : null}
+                    Restore Clinical Record
+                  </button>
+                </div>
+              </div>
+
+              {user && (
+                <div className="p-8 bg-emerald-50/50 rounded-[2.5rem] border border-emerald-100">
+                   <h4 className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-2">Push Current Snapshot</h4>
+                   <p className="text-[11px] text-slate-600 mb-6 font-medium leading-relaxed">Securely backup your {user.email} medical session to the Byinks Vault.</p>
+                   <button onClick={handleCloudBackup} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition">Initialize Cloud Backup</button>
+                </div>
+              )}
+
+              {user?.role === UserRole.ADMIN && (
+                <div className="pt-4 text-center">
+                  <button onClick={clearStorage} className="text-red-500 text-[9px] font-black uppercase tracking-widest hover:underline">Purge Local Infrastructure</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </nav>
+  );
+};
+
+export default Navbar;

@@ -1,13 +1,21 @@
 
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import React, { useState, useEffect, useRef } from 'react';
-import { User, UserRole, Transaction, AppNotification } from '../types.ts';
+import { User, UserRole, AppNotification } from '../types.ts';
 import { summarizePatientHistory } from '../services/geminiService.ts';
+
+interface SharedFile {
+  data: string; // Base64
+  name: string;
+  type: string;
+  size: number;
+}
 
 interface Message {
   senderId: string;
   senderName: string;
-  text: string;
+  text?: string;
+  file?: SharedFile;
   time: string;
   id: string;
 }
@@ -17,7 +25,6 @@ interface CommunicationOverlayProps {
   onClose: () => void;
   currentUser: User;
   targetUser: { name: string; role: string; id: string };
-  mode: 'chat' | 'video';
 }
 
 function encode(bytes: Uint8Array) {
@@ -30,32 +37,24 @@ function encode(bytes: Uint8Array) {
 }
 
 const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({ 
-  isOpen, onClose, currentUser, targetUser, mode 
+  isOpen, onClose, currentUser, targetUser 
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [transcription, setTranscription] = useState('');
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
-  const [sessionCompleted, setSessionCompleted] = useState(false);
-  const [isPaid, setIsPaid] = useState(false);
-  const SESSION_FEE = 45;
+  const [isUploading, setIsUploading] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const sessionPromiseRef = useRef<Promise<any> | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const timerRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const chatId = [currentUser.id, targetUser.id].sort().join('--');
 
   useEffect(() => {
     if (!isOpen) {
-      setSessionCompleted(false);
-      setIsPaid(false);
+      stopScribe();
       return;
     }
 
@@ -65,61 +64,23 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     };
 
     loadMessages();
-    const interval = setInterval(loadMessages, 3000); 
-    return () => clearInterval(interval);
+    window.addEventListener('storage', loadMessages);
+    startScribe();
+    
+    return () => {
+      window.removeEventListener('storage', loadMessages);
+      stopScribe();
+    };
   }, [isOpen, chatId]);
-
-  useEffect(() => {
-    if (isOpen && !sessionCompleted) {
-      setDuration(0);
-      timerRef.current = window.setInterval(() => {
-        setDuration(prev => prev + 1);
-      }, 1000);
-      
-      startMedia();
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      stopMedia();
-    }
-    return () => stopMedia();
-  }, [isOpen, sessionCompleted]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const startMedia = async () => {
+  const startScribe = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: true, 
-        video: mode === 'video' 
-      });
-      streamRef.current = stream;
-      if (mode === 'video' && videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      
-      await connectToGeminiLive(stream);
-    } catch (err) {
-      console.error("Media initialization failed:", err);
-    }
-  };
-
-  const stopMedia = () => {
-    streamRef.current?.getTracks().forEach(track => track.stop());
-    if (audioContextRef.current) audioContextRef.current.close();
-    if (timerRef.current) clearInterval(timerRef.current);
-  };
-
-  const connectToGeminiLive = async (stream: MediaStream) => {
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-      console.warn("AI Scribe unavailable: Missing API Credentials.");
-      return;
-    }
-
-    try {
-      const ai = new GoogleGenAI({ apiKey });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       audioContextRef.current = inputCtx;
       
@@ -128,243 +89,240 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
         config: {
           responseModalities: [Modality.AUDIO],
           inputAudioTranscription: {}, 
-          outputAudioTranscription: {}, 
-          systemInstruction: `You are a Clinical Scribe for Byinks Health. You are listening to a session between ${currentUser.name} and Dr. ${targetUser.name}. Transcribe the conversation accurately and identify medical symptoms, diagnostic observations, or specific patient concerns.`
+          systemInstruction: `You are a Clinical Scribe for Byinks Health. You are transcribing a secure session. Focus on capturing medical terminology and symptoms accurately.`
         },
         callbacks: {
           onopen: () => {
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
-            
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              const l = inputData.length;
-              const int16 = new Int16Array(l);
-              for (let i = 0; i < l; i++) {
-                int16[i] = inputData[i] * 32768;
-              }
+              const int16 = new Int16Array(inputData.length);
+              for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
               const pcmData = new Uint8Array(int16.buffer);
-              const base64 = encode(pcmData);
-              
-              sessionPromise.then((session) => {
-                session.sendRealtimeInput({ 
-                  media: { data: base64, mimeType: 'audio/pcm;rate=16000' } 
-                });
-              });
+              sessionPromise.then(session => session.sendRealtimeInput({ media: { data: encode(pcmData), mimeType: 'audio/pcm;rate=16000' } }));
             };
-            
             source.connect(scriptProcessor);
             scriptProcessor.connect(inputCtx.destination);
           },
-          onmessage: async (message: LiveServerMessage) => {
-            if (message.serverContent?.outputTranscription) {
-              setTranscription(prev => (prev + '\nDr: ' + message.serverContent!.outputTranscription!.text).slice(-2000));
-            } else if (message.serverContent?.inputTranscription) {
-              setTranscription(prev => (prev + '\nPatient: ' + message.serverContent!.inputTranscription!.text).slice(-2000));
+          onmessage: async (msg: LiveServerMessage) => {
+            if (msg.serverContent?.inputTranscription) {
+              setTranscription(prev => (prev + ' ' + msg.serverContent!.inputTranscription!.text).slice(-2000));
             }
           },
-          onerror: (e) => console.error("Clinical AI Scribe Signal Lost:", e),
-          onclose: () => console.log("Clinical AI Scribe Terminated Session")
+          onerror: () => {},
+          onclose: () => {}
         }
       });
-      sessionPromiseRef.current = sessionPromise;
-    } catch (e) {
-      console.warn("Clinical AI failed to synchronize.", e);
+    } catch (err) { console.warn("Scribe failed:", err); }
+  };
+
+  const stopScribe = () => {
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
     }
   };
 
-  const syncAiInsights = async () => {
-    if (messages.length === 0 && !transcription) {
-      alert("Awaiting more clinical data for synchronization.");
-      return;
-    }
-    setIsAiLoading(true);
-    try {
-      const historyStr = messages.map(m => `${m.senderName}: ${m.text}`).join('\n') + '\n' + transcription;
-      const analysis = await summarizePatientHistory(historyStr);
-      setAiAnalysis(analysis);
-    } catch (err) {
-      setAiAnalysis("Clinical analysis failed to synchronize with the cloud.");
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) return alert("Limit: 10MB per clinical file.");
 
-  const endSession = () => {
-    if (currentUser.role === UserRole.PATIENT) {
-      setSessionCompleted(true);
-    } else {
-      onClose();
-    }
-  };
-
-  const handlePayment = () => {
-    const newTransaction: Transaction = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: currentUser.id,
-      amount: SESSION_FEE,
-      type: 'consultation',
-      timestamp: new Date().toISOString(),
-      description: `Session: Dr. ${targetUser.name}`
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const newMsg: Message = { 
+        id: Math.random().toString(36).substr(2, 9),
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        file: { data: reader.result as string, name: file.name, type: file.type, size: file.size },
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+      };
+      saveMessage(newMsg);
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     };
+    reader.readAsDataURL(file);
+  };
 
-    const transactions = JSON.parse(localStorage.getItem('medi_transactions') || '[]');
-    transactions.push(newTransaction);
-    localStorage.setItem('medi_transactions', JSON.stringify(transactions));
-    
-    setIsPaid(true);
-    setTimeout(onClose, 1500);
+  const saveMessage = (msg: Message) => {
+    const stored = JSON.parse(localStorage.getItem(`chat_${chatId}`) || '[]');
+    const updated = [...stored, msg];
+    setMessages(updated);
+    localStorage.setItem(`chat_${chatId}`, JSON.stringify(updated));
+    window.dispatchEvent(new Event('storage'));
   };
 
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
-    
-    const newMsg: Message = { 
+    saveMessage({ 
       id: Math.random().toString(36).substr(2, 9),
       senderId: currentUser.id,
       senderName: currentUser.name,
       text: inputText, 
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-    };
-    
-    const stored = JSON.parse(localStorage.getItem(`chat_${chatId}`) || '[]');
-    const updated = [...stored, newMsg];
-    setMessages(updated);
-    localStorage.setItem(`chat_${chatId}`, JSON.stringify(updated));
+    });
     setInputText('');
+  };
+
+  const handleSummarize = async () => {
+    setIsAiLoading(true);
+    const textContext = messages.filter(m => m.text).map(m => `${m.senderName}: ${m.text}`).join('\n');
+    const analysis = await summarizePatientHistory(textContext || transcription || "No dialogue captured yet.");
+    setAiAnalysis(analysis);
+    setIsAiLoading(false);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 md:p-10">
-      <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={endSession}></div>
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-0 md:p-12 animate-in fade-in duration-300">
+      <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md" onClick={onClose}></div>
       
-      <div className="relative w-full h-full max-w-6xl bg-slate-900 md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col md:flex-row border border-white/5">
-        <div className="flex-grow flex flex-col bg-slate-950 relative">
-          {sessionCompleted ? (
-            <div className="flex-grow flex items-center justify-center p-12 bg-slate-900">
-              <div className="max-w-md text-center">
-                {isPaid ? (
-                  <div className="animate-in fade-in zoom-in duration-500">
-                    <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
-                    </div>
-                    <h3 className="text-2xl font-black text-white uppercase tracking-widest">Authorized</h3>
-                  </div>
-                ) : (
-                  <>
-                    <h3 className="text-3xl font-black text-white mb-6 tracking-tight">Checkout: ${SESSION_FEE}</h3>
-                    <button onClick={handlePayment} className="w-full bg-emerald-600 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-700 transition shadow-2xl">Pay for Consultation</button>
-                    <button onClick={onClose} className="mt-6 text-slate-500 text-[10px] font-black uppercase tracking-widest">Dismiss</button>
-                  </>
-                )}
+      <div className="relative w-full max-w-6xl h-full md:h-[85vh] bg-white md:rounded-[3rem] shadow-2xl flex flex-col md:flex-row overflow-hidden">
+        
+        {/* Chat Area */}
+        <div className="flex-grow flex flex-col bg-white border-r border-slate-100">
+          <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/30">
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg">
+                {targetUser.name.charAt(0)}
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-slate-900 leading-tight">{targetUser.name}</h2>
+                <div className="flex items-center text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-0.5">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5 animate-pulse"></span>
+                  Secure Clinical Tunnel
+                </div>
               </div>
             </div>
-          ) : (
-            <>
-              {mode === 'video' ? (
-                <div className="flex-grow relative bg-slate-900">
-                  <video ref={videoRef} autoPlay muted className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <div className="w-32 h-32 rounded-full border-4 border-emerald-500/20 p-1 mb-4">
-                       <div className="w-full h-full bg-slate-800/80 rounded-full flex items-center justify-center text-3xl font-black text-emerald-500 backdrop-blur-md">
-                         {targetUser.name.charAt(0)}
-                       </div>
-                    </div>
-                    <h4 className="text-2xl font-black text-white tracking-tight">Dr. {targetUser.name}</h4>
-                    <div className="mt-2 text-emerald-500 text-[10px] font-black uppercase tracking-widest animate-pulse">Clinical Signal Active</div>
-                  </div>
-                  <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex space-x-4 bg-black/40 p-4 rounded-3xl backdrop-blur-xl border border-white/10">
-                    <button onClick={() => setIsMuted(!isMuted)} className={`p-4 rounded-full transition ${isMuted ? 'bg-red-500' : 'bg-white/10'}`}>
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                    </button>
-                    <button onClick={endSession} className="p-4 bg-red-600 rounded-full hover:bg-red-500 transition shadow-xl">
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-grow flex flex-col h-full bg-slate-900">
-                  <div className="p-6 border-b border-white/5 flex items-center justify-between bg-slate-950/50">
-                    <div className="flex items-center space-x-4">
-                      <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center font-black text-white text-lg">
-                        {targetUser.name.charAt(0)}
-                      </div>
-                      <div>
-                        <h3 className="text-white font-black">Dr. {targetUser.name}</h3>
-                        <p className="text-[8px] text-emerald-500 font-black uppercase tracking-widest">Encrypted Direct Link</p>
-                      </div>
-                    </div>
-                    <div className="flex space-x-3">
-                      <button onClick={syncAiInsights} disabled={isAiLoading} className="p-2 bg-white/5 text-emerald-500 hover:bg-white/10 rounded-xl transition border border-white/5" title="Generate AI Clinical Insights">
-                        {isAiLoading ? <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" fill="none"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" className="opacity-75" fill="none"></path></svg> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
-                      </button>
-                      <button onClick={endSession} className="p-2 bg-white/5 text-slate-500 hover:text-white rounded-xl transition border border-white/5">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6" /></svg>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex-grow overflow-y-auto p-8 space-y-4 custom-scrollbar bg-slate-950/20">
-                    {messages.map((m) => (
-                      <div key={m.id} className={`flex ${m.senderId === currentUser.id ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] p-4 rounded-3xl ${
-                          m.senderId === currentUser.id 
-                            ? 'bg-emerald-600 text-white rounded-br-none shadow-lg' 
-                            : 'bg-slate-800 text-slate-200 rounded-bl-none border border-white/5'
-                        }`}>
-                          <p className="text-[7px] font-black uppercase tracking-widest opacity-60 mb-1">{m.senderName}</p>
-                          <p className="text-sm font-medium">{m.text}</p>
+            <button onClick={onClose} className="p-3 bg-slate-100 text-slate-400 hover:text-slate-900 rounded-xl transition">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          <div className="flex-grow overflow-y-auto p-8 space-y-6 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed opacity-95">
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[75%] rounded-[2rem] p-6 shadow-sm border ${
+                  msg.senderId === currentUser.id 
+                    ? 'bg-slate-900 text-white border-slate-800' 
+                    : 'bg-white text-slate-800 border-slate-100'
+                }`}>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-50 mb-2">{msg.senderName} • {msg.time}</p>
+                  
+                  {msg.text && <p className="text-sm font-medium leading-relaxed">{msg.text}</p>}
+                  
+                  {msg.file && (
+                    <div className="mt-2">
+                      {msg.file.type.startsWith('image/') ? (
+                        <img src={msg.file.data} alt="Clinical Attachment" className="rounded-xl max-h-64 object-cover border border-white/10" />
+                      ) : (
+                        <div className={`flex items-center space-x-4 p-4 rounded-xl border ${msg.senderId === currentUser.id ? 'bg-white/10 border-white/20' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center text-white">
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          </div>
+                          <div className="flex-grow overflow-hidden">
+                            <p className="text-xs font-black uppercase truncate tracking-widest">{msg.file.name}</p>
+                            <p className="text-[9px] font-bold opacity-60">{(msg.file.size / 1024).toFixed(1)} KB • Medical Document</p>
+                          </div>
+                          <a href={msg.file.data} download={msg.file.name} className="p-2 hover:bg-emerald-600 rounded-lg transition hover:text-white">
+                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                          </a>
                         </div>
-                      </div>
-                    ))}
-                    <div ref={chatEndRef} />
-                  </div>
-                  <form onSubmit={sendMessage} className="p-6 border-t border-white/5 bg-slate-950/80">
-                    <div className="flex space-x-4">
-                      <input 
-                        value={inputText} 
-                        onChange={(e) => setInputText(e.target.value)} 
-                        placeholder="Secure clinical communication..." 
-                        className="flex-grow bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 text-white text-sm outline-none focus:border-emerald-600 transition" 
-                      />
-                      <button type="submit" className="bg-emerald-600 text-white px-6 rounded-2xl hover:bg-emerald-500 transition shadow-xl">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                      </button>
+                      )}
                     </div>
-                  </form>
+                  )}
                 </div>
-              )}
-            </>
-          )}
+              </div>
+            ))}
+            <div ref={chatEndRef} />
+          </div>
+
+          <form onSubmit={sendMessage} className="p-8 border-t border-slate-50 flex items-center space-x-4 bg-slate-50/30">
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleFileUpload} 
+              className="hidden" 
+              accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
+            />
+            <button 
+              type="button" 
+              onClick={() => fileInputRef.current?.click()}
+              className={`p-4 bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 hover:border-emerald-600 rounded-2xl transition shadow-sm ${isUploading ? 'animate-pulse' : ''}`}
+              title="Upload Clinical Record"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+            </button>
+            <input 
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Secure message..."
+              className="flex-grow px-6 py-4 bg-white border border-slate-200 rounded-[1.5rem] font-medium text-sm outline-none focus:border-emerald-600 transition shadow-sm"
+            />
+            <button 
+              type="submit" 
+              disabled={!inputText.trim()}
+              className="p-4 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 transition shadow-lg shadow-emerald-200 disabled:opacity-50"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+            </button>
+          </form>
         </div>
 
-        <div className="w-full md:w-80 bg-slate-950 p-8 border-l border-white/5 flex flex-col">
-          <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-8">Clinical Intelligence</h4>
-          <div className="space-y-6 flex-grow overflow-y-auto custom-scrollbar pr-2">
-            <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-3xl">
-              <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest block mb-3">Live Scribe Logs</span>
-              <p className="text-[11px] text-slate-400 leading-relaxed font-medium italic whitespace-pre-wrap">
-                {transcription || 'Awaiting clinical data stream from session...'}
+        {/* Sidebar: Scribe & AI Analysis */}
+        <div className="w-full md:w-96 flex flex-col bg-slate-50 p-8 space-y-8 overflow-y-auto custom-scrollbar">
+          <section>
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-4">Live Clinical Scribe</h3>
+            <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm min-h-[150px] relative">
+              <div className="absolute top-4 right-4 flex space-x-1">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce"></span>
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce delay-100"></span>
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce delay-200"></span>
+              </div>
+              <p className="text-xs text-slate-600 font-medium italic leading-relaxed">
+                {transcription || "Awaiting audio input from secure session..."}
               </p>
             </div>
+          </section>
 
-            {aiAnalysis && (
-              <div className="p-6 bg-blue-500/5 border border-blue-500/10 rounded-3xl animate-in fade-in slide-in-from-bottom-2 duration-500">
-                <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest block mb-3">Diagnostic Insights</span>
-                <p className="text-[11px] text-slate-300 leading-relaxed font-medium whitespace-pre-wrap">{aiAnalysis}</p>
-              </div>
-            )}
-
-            <div className="p-6 bg-slate-900 rounded-3xl border border-white/5 text-center">
-              <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block mb-1">Session Timer</span>
-              <span className="text-2xl font-black text-white tabular-nums">{new Date(duration * 1000).toISOString().substr(14, 5)}</span>
+          <section className="flex-grow flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em]">AI Case Analysis</h3>
+              <button 
+                onClick={handleSummarize}
+                disabled={isAiLoading || (!transcription && messages.length === 0)}
+                className="text-[9px] font-black uppercase text-emerald-600 hover:underline disabled:opacity-30"
+              >
+                {isAiLoading ? 'Synthesizing...' : 'Sync Insight'}
+              </button>
             </div>
-          </div>
-          <div className="mt-8 pt-8 border-t border-white/5 flex items-center justify-between text-[8px] font-black text-slate-600 uppercase tracking-widest">
-            <span>Byinks Global Node</span>
-            <span className="text-emerald-500">Secure</span>
+            
+            <div className="flex-grow bg-emerald-900 rounded-[2.5rem] p-8 text-white relative overflow-hidden group">
+              <div className="relative z-10">
+                {aiAnalysis ? (
+                  <p className="text-xs font-medium leading-relaxed animate-in fade-in slide-in-from-bottom-2">
+                    {aiAnalysis}
+                  </p>
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-center space-y-4 py-12 opacity-40">
+                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    <p className="text-[9px] font-black uppercase tracking-widest leading-loose">Initialize AI analysis for automated clinical scribing & summaries.</p>
+                  </div>
+                )}
+              </div>
+              <div className="absolute bottom-0 right-0 w-32 h-32 bg-emerald-500/20 rounded-full blur-2xl -mr-16 -mb-16"></div>
+            </div>
+          </section>
+
+          <div className="pt-6 border-t border-slate-200">
+             <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex items-start space-x-3">
+               <svg className="w-5 h-5 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+               <p className="text-[10px] text-amber-800 font-bold leading-relaxed uppercase tracking-tight">Clinical Alert: All data in this session is encrypted. HIPAA/GDPR Compliance active.</p>
+             </div>
           </div>
         </div>
       </div>

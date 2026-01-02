@@ -29,7 +29,6 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
 
   // Communication state
   const [isCommOpen, setIsCommOpen] = useState(false);
-  const [commMode, setCommMode] = useState<'chat' | 'video'>('chat');
 
   const timeSlots = ['08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
 
@@ -178,9 +177,8 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
     }
   };
 
-  const openComm = (mode: 'chat' | 'video') => {
+  const openComm = () => {
     if (!selectedPatient) return;
-    setCommMode(mode);
     setIsCommOpen(true);
   };
 
@@ -411,23 +409,16 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                   </div>
                   <div className="flex flex-wrap gap-4">
                     <button 
-                      onClick={() => openComm('video')} 
-                      className="p-5 bg-emerald-50 text-emerald-600 rounded-[1.5rem] hover:bg-emerald-600 hover:text-white transition-all border border-emerald-100 shadow-sm"
-                      title="Start Clinical Video Call"
+                      onClick={openComm} 
+                      className="bg-slate-900 text-white px-8 py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition-all shadow-xl flex items-center"
                     >
-                      <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                    </button>
-                    <button 
-                      onClick={() => openComm('chat')} 
-                      className="p-5 bg-emerald-50 text-emerald-600 rounded-[1.5rem] hover:bg-emerald-600 hover:text-white transition-all border border-emerald-100 shadow-sm"
-                      title="Open Direct Encryption Chat"
-                    >
-                      <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+                      <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+                      Secure Communication Hub
                     </button>
                     <button
                       onClick={() => handleSummarize(selectedPatient.lastMessage || 'No recent clinical input available.')}
                       disabled={loading}
-                      className="bg-slate-900 text-white px-10 py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition-all shadow-2xl disabled:opacity-50 flex items-center"
+                      className="bg-white border border-slate-200 text-slate-900 px-8 py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:border-emerald-600 hover:text-emerald-600 transition-all shadow-sm flex items-center"
                     >
                       {loading && (
                         <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -505,7 +496,6 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
           onClose={() => setIsCommOpen(false)}
           currentUser={user}
           targetUser={{ name: selectedPatient.name, role: 'Patient', id: selectedPatient.id }}
-          mode={commMode}
         />
       )}
     </div>

@@ -26,7 +26,6 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
 
   // Communication state
   const [isCommOpen, setIsCommOpen] = useState(false);
-  const [commMode, setCommMode] = useState<'chat' | 'video'>('chat');
   const [selectedConsultant, setSelectedConsultant] = useState<{name: string, role: string, id: string} | null>(null);
 
   useEffect(() => {
@@ -77,8 +76,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
     setShowInput(true);
   };
 
-  const openComm = (mode: 'chat' | 'video', consultant: {name: string, role: string, id: string}) => {
-    setCommMode(mode);
+  const openComm = (consultant: {name: string, role: string, id: string}) => {
     setSelectedConsultant(consultant);
     setIsCommOpen(true);
   };
@@ -233,10 +231,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
                       </div>
                     </div>
                     <div className="flex space-x-3">
-                      <button onClick={() => openComm('chat', { name: c.name, role: UserRole.CONSULTANT, id: c.id })} className="flex-grow bg-white border border-slate-200 text-[10px] font-black uppercase tracking-widest py-3 rounded-xl hover:bg-emerald-600 hover:text-white transition shadow-sm">Initiate Chat</button>
-                      <button onClick={() => openComm('video', { name: c.name, role: UserRole.CONSULTANT, id: c.id })} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-emerald-600 hover:text-white transition shadow-sm">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                      </button>
+                      <button onClick={() => openComm({ name: c.name, role: UserRole.CONSULTANT, id: c.id })} className="flex-grow bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest py-3 rounded-xl hover:bg-emerald-600 transition shadow-sm">Secure Chat & Files</button>
                     </div>
                   </div>
                 )) : (
@@ -348,7 +343,6 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
           onClose={() => { setIsCommOpen(false); setSelectedConsultant(null); }}
           currentUser={user}
           targetUser={selectedConsultant}
-          mode={commMode}
         />
       )}
     </div>
