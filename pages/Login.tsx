@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types.ts';
 
 interface LoginProps {
@@ -8,7 +8,7 @@ interface LoginProps {
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [isRegister, setIsRegister] = useState(false);
-  const [step, setStep] = useState(1); // 1: Auth Info, 2: Medical Info (for Patients)
+  const [step, setStep] = useState(1);
   const [role, setRole] = useState<UserRole>(UserRole.PATIENT);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -19,9 +19,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [age, setAge] = useState('');
   const [bloodType, setBloodType] = useState('');
   const [genotype, setGenotype] = useState('');
-  const [height, setHeight] = useState('');
-  const [weight, setWeight] = useState('');
-  const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   
   const [error, setError] = useState('');
@@ -40,11 +37,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       if (data.avail) localStorage.setItem('medi_availability', data.avail);
       if (data.notifs) localStorage.setItem('medi_notifications', data.notifs);
       
-      alert("Hospital data synced successfully. You can now log in.");
+      // Force refresh of any existing state in other tabs
+      window.dispatchEvent(new Event('storage'));
+      
+      alert("Hospital network link established successfully. You may now log in.");
       setShowImport(false);
       setImportToken('');
+      setError('');
     } catch (e) {
-      setError("Invalid Sync Token. Please request a new one from your Admin.");
+      setError("Data Sync Failed: Invalid or corrupted System Sync Token.");
     }
   };
 
@@ -68,28 +69,25 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       const isAdmin = role === UserRole.ADMIN;
       
       if (isAdmin && adminSecret !== MASTER_KEY) {
-        setError('Invalid System Master Key. Administrative registration denied.');
+        setError('Security Violation: Invalid System Master Key.');
         return;
       }
 
-      if (registeredUsers.find(u => u.email === email)) {
-        setError('An account with this email already exists.');
+      if (registeredUsers.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+        setError('Clinical Error: Email already registered in the hospital network.');
         return;
       }
 
       const newUser: User = {
         id: Math.random().toString(36).substr(2, 9),
         name,
-        email,
+        email: email.toLowerCase(),
         role: isAdmin ? UserRole.ADMIN : UserRole.PATIENT,
         isApproved: true,
         ...(role === UserRole.PATIENT ? {
           age: parseInt(age) || 0,
           bloodType,
           genotype,
-          height,
-          weight,
-          phone,
           address
         } : {})
       };
@@ -100,23 +98,23 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       onLogin(newUser);
 
     } else {
-      // Login Flow
-      const foundUser = registeredUsers.find(u => u.email === email);
+      const foundUser = registeredUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
       
       if (foundUser) {
         onLogin(foundUser);
       } else {
-        if (email.includes('admin') && !registeredUsers.length) {
+        // Fallback for first-time admin setup
+        if (email.toLowerCase().includes('admin') && registeredUsers.length === 0) {
            const adminUser: User = { 
-             id: 'admin-1', 
-             name: 'System Admin', 
-             email, 
+             id: 'admin-001', 
+             name: 'Genesis Admin', 
+             email: email.toLowerCase(), 
              role: UserRole.ADMIN, 
              isApproved: true 
            };
            onLogin(adminUser);
         } else {
-           setError('Account not found on this device. If you are a Consultant, ensure you have linked your device to the hospital network using a Sync Token from the Admin.');
+           setError('Identity Not Found: If you registered on another device, use the "Link to Hospital Network" tool below to synchronize your data.');
         }
       }
     }
@@ -124,58 +122,53 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
   return (
     <div className="min-h-[calc(100vh-128px)] flex items-center justify-center bg-slate-50 p-4">
-      <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden transition-all duration-500">
+      <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl border border-slate-100 overflow-hidden">
         <div className="p-8 md:p-12">
           <div className="text-center mb-10">
-            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-xl transition-all duration-500 bg-emerald-600`}>
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-xl bg-emerald-600`}>
               <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
               </svg>
             </div>
             <h2 className="text-3xl font-black text-slate-900 tracking-tight">
-              {showImport ? 'Join Network' : isRegister ? (role === UserRole.ADMIN ? 'Admin Setup' : 'Create Profile') : 'Welcome Back'}
+              {showImport ? 'Network Link' : isRegister ? (role === UserRole.ADMIN ? 'Admin Setup' : 'Clinical Intake') : 'MediSphere Login'}
             </h2>
             <p className="text-slate-500 mt-2 font-medium text-sm leading-relaxed">
-              {showImport ? 'Paste your Hospital Sync Token to connect' : isRegister 
-                ? (step === 1 ? 'Step 1: Account Information' : 'Step 2: Clinical Intake') 
-                : 'Enter your Byinks Health portal'}
+              {showImport ? 'Mirror clinical data from another device' : isRegister 
+                ? (step === 1 ? 'Step 1: Security Credentials' : 'Step 2: Medical Profile') 
+                : 'Access your secure healthcare portal'}
             </p>
           </div>
 
           {error && (
-            <div className="mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center space-x-3 text-red-600">
-              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            <div className="mb-8 p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-start space-x-3 text-amber-800">
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
               <p className="text-[10px] font-black uppercase tracking-wide leading-relaxed">{error}</p>
             </div>
           )}
 
           {showImport ? (
             <div className="space-y-6 animate-in slide-in-from-bottom-4">
+              <div className="bg-blue-50 p-4 rounded-xl text-[10px] text-blue-700 font-bold leading-relaxed mb-4">
+                NOTICE: This application uses localized storage. To access data across different browsers or devices, you must paste the Sync Token generated by your Hospital Administrator.
+              </div>
               <textarea 
                 value={importToken}
                 onChange={(e) => setImportToken(e.target.value)}
-                placeholder="Paste System Sync Token here..."
-                className="w-full h-32 p-5 bg-slate-50 border border-slate-200 rounded-2xl text-[10px] font-mono outline-none focus:border-emerald-600 transition"
+                placeholder="Paste encrypted System Sync Token..."
+                className="w-full h-32 p-5 bg-slate-50 border border-slate-200 rounded-2xl text-[9px] font-mono outline-none focus:border-emerald-600 transition"
               />
               <div className="flex space-x-3">
-                <button onClick={() => setShowImport(false)} className="flex-grow py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest">Back</button>
-                <button onClick={handleImport} className="flex-[2] py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl">Synchronize Data</button>
+                <button onClick={() => setShowImport(false)} className="flex-grow py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest">Cancel</button>
+                <button onClick={handleImport} className="flex-[2] py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl">Confirm Link</button>
               </div>
             </div>
           ) : (
             <form onSubmit={handleNextStep} className="space-y-6">
               {isRegister && step === 1 && (
                 <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl mb-6">
-                  <button
-                    type="button"
-                    onClick={() => setRole(UserRole.PATIENT)}
-                    className={`py-3 text-[11px] font-black rounded-xl transition-all uppercase tracking-widest ${role === UserRole.PATIENT ? 'bg-white shadow-md text-emerald-600' : 'text-slate-500'}`}
-                  >Patient</button>
-                  <button
-                    type="button"
-                    onClick={() => setRole(UserRole.ADMIN)}
-                    className={`py-3 text-[11px] font-black rounded-xl transition-all uppercase tracking-widest ${role === UserRole.ADMIN ? 'bg-emerald-600 shadow-md text-white' : 'text-slate-500'}`}
-                  >Admin</button>
+                  <button type="button" onClick={() => setRole(UserRole.PATIENT)} className={`py-3 text-[11px] font-black rounded-xl transition-all uppercase tracking-widest ${role === UserRole.PATIENT ? 'bg-white shadow-md text-emerald-600' : 'text-slate-500'}`}>Patient</button>
+                  <button type="button" onClick={() => setRole(UserRole.ADMIN)} className={`py-3 text-[11px] font-black rounded-xl transition-all uppercase tracking-widest ${role === UserRole.ADMIN ? 'bg-emerald-600 shadow-md text-white' : 'text-slate-500'}`}>Admin</button>
                 </div>
               )}
 
@@ -183,30 +176,30 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 <div className="space-y-5 animate-in fade-in duration-300">
                   {isRegister && (
                     <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Full Name</label>
-                      <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-600 outline-none transition font-medium" placeholder="Full legal name" />
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Legal Name</label>
+                      <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" placeholder="First Last" />
                     </div>
                   )}
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Email Address</label>
-                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-600 outline-none transition font-medium" placeholder="Email@example.com" />
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Email Protocol</label>
+                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" placeholder="Email@clinical.com" />
                   </div>
                   {isRegister && role === UserRole.ADMIN && (
                     <div>
-                      <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-2 ml-1">Master Key</label>
-                      <input type="password" required value={adminSecret} onChange={(e) => setAdminSecret(e.target.value)} className="w-full px-5 py-4 bg-emerald-50 border border-emerald-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/10 outline-none transition font-medium" placeholder="••••••••" />
+                      <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-2 ml-1">Genesis Master Key</label>
+                      <input type="password" required value={adminSecret} onChange={(e) => setAdminSecret(e.target.value)} className="w-full px-5 py-4 bg-emerald-50 border border-emerald-200 rounded-2xl outline-none font-medium" placeholder="••••••••" />
                     </div>
                   )}
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Password</label>
-                    <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/10 outline-none transition font-medium" placeholder="••••••••" />
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Portal Password</label>
+                    <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" placeholder="••••••••" />
                   </div>
                 </div>
               ) : (
                 <div className="space-y-5 animate-in slide-in-from-right-4 duration-500 max-h-[450px] overflow-y-auto px-1 custom-scrollbar">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Age</label>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Patient Age</label>
                       <input type="number" required value={age} onChange={(e) => setAge(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" placeholder="25" />
                     </div>
                     <div>
@@ -217,7 +210,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Blood Group</label>
                     <select required value={bloodType} onChange={(e) => setBloodType(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium">
-                      <option value="">Select...</option>
+                      <option value="">Select Category...</option>
                       <option value="A+">A+</option><option value="A-">A-</option>
                       <option value="B+">B+</option><option value="B-">B-</option>
                       <option value="O+">O+</option><option value="O-">O-</option>
@@ -225,8 +218,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Residential Address</label>
-                    <textarea required value={address} onChange={(e) => setAddress(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none h-24 resize-none font-medium" placeholder="Full home address" />
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Primary Residence</label>
+                    <textarea required value={address} onChange={(e) => setAddress(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none h-24 resize-none font-medium" placeholder="Residential details..." />
                   </div>
                 </div>
               )}
@@ -235,11 +228,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 {step === 2 && (
                   <button type="button" onClick={() => setStep(1)} className="px-6 py-4 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition">Back</button>
                 )}
-                <button
-                  type="submit"
-                  className={`flex-grow py-5 rounded-2xl font-black text-xs uppercase tracking-widest text-white shadow-xl transition-all transform active:scale-95 bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100`}
-                >
-                  {isRegister && step === 1 && role === UserRole.PATIENT ? 'Proceed to Intake' : isRegister ? 'Confirm Registration' : 'Enter Portal'}
+                <button type="submit" className="flex-grow py-5 rounded-2xl font-black text-xs uppercase tracking-widest text-white shadow-xl transition-all transform active:scale-95 bg-emerald-600 hover:bg-emerald-700">
+                  {isRegister && step === 1 && role === UserRole.PATIENT ? 'Proceed to Clinical Info' : isRegister ? 'Initialize Account' : 'Authenticate'}
                 </button>
               </div>
             </form>
@@ -247,10 +237,10 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           <div className="mt-10 flex flex-col space-y-4 text-center border-t border-slate-100 pt-8">
             <button onClick={() => { setIsRegister(!isRegister); setStep(1); setError(''); setShowImport(false); }} className="text-emerald-600 font-black text-xs uppercase tracking-widest hover:underline transition">
-              {isRegister ? 'Return to Sign In' : 'New Patient? Create Profile'}
+              {isRegister ? 'Return to MediSphere Sign In' : 'New Patient? Create Global Profile'}
             </button>
             <button onClick={() => { setShowImport(true); setIsRegister(false); setError(''); }} className="text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-900 transition">
-              Link to Hospital Network (Sync Token)
+              Link to Hospital Network (Device Sync)
             </button>
           </div>
         </div>

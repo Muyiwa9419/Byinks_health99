@@ -1,54 +1,46 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize GoogleGenAI lazily or with a safety check to prevent top-level boot errors
-const getAI = () => {
+// Standard initialization as per guidelines
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+export const analyzeSymptoms = async (symptoms: string) => {
   try {
-    const key = process.env.API_KEY;
-    if (!key) return null;
-    return new GoogleGenAI({ apiKey: key });
+    const response = await ai.models.generateContent({
+      model: "gemini-3-pro-preview",
+      contents: `Analyze the following symptoms and provide a potential health assessment. 
+      Disclaimer: Always mention this is not a substitute for professional medical advice.
+      Symptoms: ${symptoms}`,
+      config: {
+        temperature: 0.7,
+      },
+    });
+    return response.text || "Diagnostic analysis returned no results.";
   } catch (e) {
-    console.error("MediSphere AI Init Error:", e);
-    return null;
+    console.error("AI Analysis Error:", e);
+    return "The clinical AI engine is currently under maintenance. Please contact a human specialist directly.";
   }
 };
 
-const ai = getAI();
-
-export const analyzeSymptoms = async (symptoms: string) => {
-  if (!ai) return "AI medical analysis is currently offline. Please consult a clinician directly.";
-  
-  const response = await ai.models.generateContent({
-    model: "gemini-3-pro-preview",
-    contents: `Analyze the following symptoms and provide a potential health assessment. 
-    Disclaimer: Always mention this is not a substitute for professional medical advice.
-    Symptoms: ${symptoms}`,
-    config: {
-      temperature: 0.7,
-      maxOutputTokens: 500,
-      thinkingConfig: { thinkingBudget: 250 },
-    },
-  });
-  return response.text || "Diagnostic analysis returned no results.";
-};
-
 export const summarizePatientHistory = async (history: string) => {
-  if (!ai) return "AI Synthesis offline.";
-  
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `Summarize this patient's medical history for a busy consultant. 
-    Focus on key diagnoses, medications, and recent trends.
-    History: ${history}`,
-    config: {
-      temperature: 0.2,
-    },
-  });
-  return response.text || "Summary generation failed.";
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Summarize this patient's medical history for a busy consultant. 
+      Focus on key diagnoses, medications, and recent trends.
+      History: ${history}`,
+      config: {
+        temperature: 0.2,
+      },
+    });
+    return response.text || "Summary generation failed.";
+  } catch (e) {
+    console.error("AI Summary Error:", e);
+    return "Unable to synchronize AI context at this time.";
+  }
 };
 
 export const getHealthTips = async () => {
-  if (!ai) return [];
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -65,7 +57,6 @@ export const getHealthTips = async () => {
               category: { type: Type.STRING }
             },
             required: ["title", "description", "category"],
-            propertyOrdering: ["title", "description", "category"],
           }
         }
       }
@@ -73,7 +64,11 @@ export const getHealthTips = async () => {
     const jsonStr = response.text?.trim();
     return JSON.parse(jsonStr || "[]");
   } catch (e) {
-    console.error("MediSphere Health Tips Error:", e);
-    return [];
+    console.error("Health Tips AI Error:", e);
+    return [
+      { title: "Stay Hydrated", description: "Drink at least 8 glasses of water daily.", category: "Wellness" },
+      { title: "Daily Movement", description: "Aim for a 30-minute walk today.", category: "Fitness" },
+      { title: "Sleep Hygiene", description: "Ensure 7-9 hours of restful sleep.", category: "Recovery" }
+    ];
   }
 };
