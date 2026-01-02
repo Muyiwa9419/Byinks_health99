@@ -49,14 +49,13 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     return () => window.removeEventListener('storage', fetchPortalData);
   }, [user.id]);
 
-  const handleUpdateProfile = (e: React.FormEvent) => {
+  const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateUser({ ...user, ...editData });
     setIsEditProfileOpen(false);
-    ClinicalAPI.broadcastSystemEvent('PROFILE_UPDATE', { userId: user.id });
   };
 
-  const addNotification = (userId: string, title: string, message: string) => {
+  const addNotification = async (userId: string, title: string, message: string) => {
     const notifications: AppNotification[] = JSON.parse(localStorage.getItem('medi_notifications') || '[]');
     notifications.push({
       id: Math.random().toString(36).substr(2, 9),
@@ -67,23 +66,18 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
       isRead: false,
       type: 'system'
     });
-    localStorage.setItem('medi_notifications', JSON.stringify(notifications));
-    window.dispatchEvent(new Event('storage'));
-    
-    // Broadcast for cloud sync
-    ClinicalAPI.broadcastSystemEvent('NOTIFICATION_CREATED', { userId });
+    await ClinicalAPI.saveNotifications(notifications);
   };
 
-  const handleCancelAppointment = (id: string) => {
+  const handleCancelAppointment = async (id: string) => {
     if (!confirm("Clinical Protocol: Are you sure you want to cancel this engagement? The specialist will be notified.")) return;
 
-    const allApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
     const idx = allApps.findIndex((a: Appointment) => a.id === id);
     if (idx > -1) {
       const app = allApps[idx];
       app.status = 'cancelled';
-      localStorage.setItem('medi_appointments', JSON.stringify(allApps));
-      setAppointments(allApps.filter((a: Appointment) => a.patientId === user.id));
+      await ClinicalAPI.saveAppointments(allApps);
       
       // Notify Consultant
       addNotification(
@@ -91,64 +85,42 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
         'Appointment Cancelled by Patient',
         `${user.name} has cancelled their session scheduled for ${app.date} at ${app.time}.`
       );
-
-      // Cloud Pulse
-      ClinicalAPI.broadcastSystemEvent('APPOINTMENT_UPDATED', { appointmentId: id, patientId: user.id, consultantId: app.consultantId });
     }
   };
 
-  const handleDeleteAppointment = (id: string) => {
+  const handleDeleteAppointment = async (id: string) => {
     if (!confirm("Clinical Record Purge: Are you sure you want to permanently remove this appointment from your history? This action cannot be undone.")) return;
 
-    const allApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
     const filteredApps = allApps.filter((a: Appointment) => a.id !== id);
-    localStorage.setItem('medi_appointments', JSON.stringify(filteredApps));
-    setAppointments(filteredApps.filter((a: Appointment) => a.patientId === user.id));
-    
-    // Broadcast change to other tabs and other devices
-    window.dispatchEvent(new Event('storage'));
-    ClinicalAPI.broadcastSystemEvent('APPOINTMENT_DELETED', { appointmentId: id, userId: user.id });
+    await ClinicalAPI.saveAppointments(filteredApps);
   };
 
-  const handleRescheduleClick = (app: Appointment) => {
-    setRescheduleApp(app);
-    setIsReschedulingOpen(true);
-  };
-
-  const handleRescheduleSubmit = (e: React.FormEvent) => {
+  const handleRescheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rescheduleApp) return;
 
-    const allApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
     const idx = allApps.findIndex((a: Appointment) => a.id === rescheduleApp.id);
     if (idx > -1) {
       const oldDate = allApps[idx].date;
       const oldTime = allApps[idx].time;
       
-      allApps[idx] = { 
-        ...rescheduleApp, 
-        status: 'pending' // Re-verify status after reschedule
-      };
-      
-      localStorage.setItem('medi_appointments', JSON.stringify(allApps));
-      setAppointments(allApps.filter((a: Appointment) => a.patientId === user.id));
+      allApps[idx] = { ...rescheduleApp, status: 'pending' };
+      await ClinicalAPI.saveAppointments(allApps);
 
-      // Notify Consultant
       addNotification(
         rescheduleApp.consultantId,
         'Appointment Rescheduled',
         `${user.name} moved their session from ${oldDate} at ${oldTime} to ${rescheduleApp.date} at ${rescheduleApp.time}.`
       );
 
-      // Cloud Pulse
-      ClinicalAPI.broadcastSystemEvent('APPOINTMENT_UPDATED', { appointmentId: rescheduleApp.id, patientId: user.id, consultantId: rescheduleApp.consultantId });
-
       setIsReschedulingOpen(false);
       setRescheduleApp(null);
     }
   };
 
-  const handleBookAppointment = (e: React.FormEvent) => {
+  const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newApp.consultantId || !newApp.date || !newApp.time) return;
 
@@ -169,10 +141,9 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
       fee: 45
     };
 
-    const allApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
     const updatedApps = [...allApps, appointment];
-    localStorage.setItem('medi_appointments', JSON.stringify(updatedApps));
-    setAppointments(updatedApps.filter(a => a.patientId === user.id));
+    await ClinicalAPI.saveAppointments(updatedApps);
     
     // Notify Consultant
     addNotification(
@@ -180,9 +151,6 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
       'New Appointment Request',
       `${user.name} requested an appointment for ${newApp.date} at ${newApp.time}.`
     );
-
-    // Cloud Pulse
-    ClinicalAPI.broadcastSystemEvent('APPOINTMENT_CREATED', { appointmentId: appointment.id, patientId: user.id, consultantId: consultant.id });
 
     setIsBookingOpen(false);
     setNewApp({ consultantId: '', date: '', time: '', notes: '' });
@@ -283,7 +251,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
                       {app.status !== 'cancelled' && app.status !== 'completed' && (
                         <>
                           <button 
-                            onClick={() => handleRescheduleClick(app)}
+                            onClick={() => { setRescheduleApp(app); setIsReschedulingOpen(true); }}
                             className="px-5 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition"
                           >
                             Reschedule
@@ -297,7 +265,6 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
                         </>
                       )}
                       
-                      {/* Delete History Button */}
                       <button 
                         onClick={() => handleDeleteAppointment(app.id)}
                         className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-500 hover:border-red-200 transition"
@@ -407,43 +374,6 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
               </div>
               <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition shadow-xl shadow-slate-200">
                 Sync Rescheduling Request
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Profile Edit Modal */}
-      {isEditProfileOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsEditProfileOpen(false)}></div>
-          <div className="relative w-full max-w-2xl bg-white rounded-[3.5rem] shadow-2xl p-10 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Clinical Record Update</h3>
-            <form onSubmit={handleUpdateProfile} className="space-y-6">
-              <div className="grid md:grid-cols-2 gap-6">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Legal Name</label>
-                  <input type="text" value={editData.name} onChange={(e) => setEditData({...editData, name: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Email Protocol</label>
-                  <input type="email" value={editData.email} onChange={(e) => setEditData({...editData, email: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Age</label>
-                  <input type="number" value={editData.age} onChange={(e) => setEditData({...editData, age: parseInt(e.target.value)})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Phone Line</label>
-                  <input type="text" value={editData.phone} onChange={(e) => setEditData({...editData, phone: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600" />
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Home Address</label>
-                <textarea value={editData.address} onChange={(e) => setEditData({...editData, address: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none h-24 resize-none focus:border-emerald-600" />
-              </div>
-              <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition shadow-2xl">
-                Sync Changes to Portal
               </button>
             </form>
           </div>

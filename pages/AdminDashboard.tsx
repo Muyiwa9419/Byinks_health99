@@ -40,10 +40,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
   const fetchData = async () => {
     setLoading(true);
-    const [users, syncs] = await Promise.all([
-      ClinicalAPI.getAllUsers(),
-      ClinicalAPI.getSyncRequests()
-    ]);
+    const users = await ClinicalAPI.getAllUsers();
+    const syncs = await ClinicalAPI.getSyncRequests();
     
     const totalPatients = users.filter(u => u.role === UserRole.PATIENT).length;
     const activeConsultants = users.filter(u => u.role === UserRole.CONSULTANT && u.isApproved).length;
@@ -86,6 +84,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       await ClinicalAPI.updateUserStatus(userId, { isApproved: true });
       fetchData();
     } catch (e) { alert("Failed to approve consultant."); }
+  };
+
+  const handleRemoveUser = async (userId: string, userName: string) => {
+    if (userId === user.id) {
+      alert("Infrastructure Lockout Prevention: You cannot decommission your own administrative identity.");
+      return;
+    }
+
+    if (!confirm(`Clinical Hazard: You are about to permanently remove ${userName} from the MediSphere clinical registry. This action is irreversible and will synchronize across all nodes. Proceed?`)) {
+      return;
+    }
+
+    try {
+      await ClinicalAPI.removeUser(userId);
+      fetchData();
+    } catch (e) {
+      alert("System Error: Failed to decommission clinical identity.");
+    }
   };
 
   const handleUpdateSyncStatus = async (requestId: string, status: 'approved' | 'rejected') => {
@@ -167,7 +183,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {allUsers.map(u => (
-                  <tr key={u.id}>
+                  <tr key={u.id} className="animate-in fade-in slide-in-from-left-2 duration-300">
                     <td className="py-6">
                       <div className="flex items-center space-x-4">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-white ${u.role === UserRole.ADMIN ? 'bg-slate-900' : 'bg-emerald-600'}`}>{u.name.charAt(0)}</div>
@@ -177,14 +193,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                     <td className="py-6"><span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg ${u.role === UserRole.ADMIN ? 'bg-slate-900 text-white' : 'bg-emerald-50 text-emerald-600'}`}>{u.role}</span></td>
                     <td className="py-6"><span className={`text-[9px] font-black uppercase tracking-widest ${u.isApproved ? 'text-emerald-600' : 'text-amber-500'}`}>{u.isApproved ? 'Verified' : 'Pending'}</span></td>
                     <td className="py-6 text-right">
-                      {u.role === UserRole.CONSULTANT && !u.isApproved && (
-                        <button onClick={() => handleApproveDoctor(u.id)} className="px-4 py-2 bg-emerald-600 text-white text-[9px] font-black uppercase tracking-widest rounded-xl mr-2">Approve</button>
-                      )}
-                      <select onChange={(e) => handleUpdateRole(u.id, e.target.value as UserRole)} value={u.role} className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[9px] font-black uppercase tracking-widest outline-none">
-                        <option value={UserRole.PATIENT}>Patient</option>
-                        <option value={UserRole.CONSULTANT}>Consultant</option>
-                        <option value={UserRole.ADMIN}>Admin</option>
-                      </select>
+                      <div className="flex items-center justify-end space-x-3">
+                        {u.role === UserRole.CONSULTANT && !u.isApproved && (
+                          <button onClick={() => handleApproveDoctor(u.id)} className="px-4 py-2 bg-emerald-600 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-emerald-700 transition">Approve</button>
+                        )}
+                        <select onChange={(e) => handleUpdateRole(u.id, e.target.value as UserRole)} value={u.role} className="px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[9px] font-black uppercase tracking-widest outline-none focus:border-emerald-500 transition">
+                          <option value={UserRole.PATIENT}>Patient</option>
+                          <option value={UserRole.CONSULTANT}>Consultant</option>
+                          <option value={UserRole.ADMIN}>Admin</option>
+                        </select>
+                        {u.id !== user.id && (
+                          <button 
+                            onClick={() => handleRemoveUser(u.id, u.name)}
+                            className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                            title="Decommission Identity"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -230,16 +257,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10">
             <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Direct Clinical Onboarding</h3>
             <form onSubmit={handleOnboardSubmit} className="space-y-6">
-              <input required placeholder="Name" value={onboardForm.name} onChange={(e) => setOnboardForm({...onboardForm, name: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" />
-              <input required type="email" placeholder="Email Identifier" value={onboardForm.email} onChange={(e) => setOnboardForm({...onboardForm, email: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" />
+              <input required placeholder="Name" value={onboardForm.name} onChange={(e) => setOnboardForm({...onboardForm, name: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
+              <input required type="email" placeholder="Email Identifier" value={onboardForm.email} onChange={(e) => setOnboardForm({...onboardForm, email: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
               <div className="grid grid-cols-2 gap-3">
-                <button type="button" onClick={() => setOnboardForm({...onboardForm, role: UserRole.CONSULTANT})} className={`py-3 text-[10px] font-black rounded-xl transition ${onboardForm.role === UserRole.CONSULTANT ? 'bg-emerald-600 text-white' : 'bg-slate-50 text-slate-400'}`}>Specialist</button>
-                <button type="button" onClick={() => setOnboardForm({...onboardForm, role: UserRole.ADMIN})} className={`py-3 text-[10px] font-black rounded-xl transition ${onboardForm.role === UserRole.ADMIN ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400'}`}>Administrator</button>
+                <button type="button" onClick={() => setOnboardForm({...onboardForm, role: UserRole.CONSULTANT})} className={`py-3 text-[10px] font-black rounded-xl transition ${onboardForm.role === UserRole.CONSULTANT ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-50 text-slate-400'}`}>Specialist</button>
+                <button type="button" onClick={() => setOnboardForm({...onboardForm, role: UserRole.ADMIN})} className={`py-3 text-[10px] font-black rounded-xl transition ${onboardForm.role === UserRole.ADMIN ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-400'}`}>Administrator</button>
               </div>
               {onboardForm.role === UserRole.CONSULTANT && (
-                <input required placeholder="Specialty" value={onboardForm.specialty} onChange={(e) => setOnboardForm({...onboardForm, specialty: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" />
+                <input required placeholder="Specialty" value={onboardForm.specialty} onChange={(e) => setOnboardForm({...onboardForm, specialty: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
               )}
-              <button type="submit" className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition">Authorize System Entry</button>
+              <button type="submit" className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition shadow-xl shadow-emerald-200">Authorize System Entry</button>
             </form>
           </div>
         </div>
