@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Appointment, UserRole, ConsultantAvailability, AppNotification } from '../types.ts';
+import { User, Appointment, UserRole, AppNotification } from '../types.ts';
 import { useNavigate } from 'react-router-dom';
 
 interface PatientProfileProps {
@@ -13,6 +13,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [consultants, setConsultants] = useState<User[]>([]);
   const [isBookingOpen, setIsBookingOpen] = useState(false);
+  const [isReschedulingOpen, setIsReschedulingOpen] = useState(false);
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   
   const [editData, setEditData] = useState<Partial<User>>({ ...user });
@@ -22,6 +23,8 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     time: '',
     notes: ''
   });
+
+  const [rescheduleApp, setRescheduleApp] = useState<Appointment | null>(null);
 
   const timeSlots = ['08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
 
@@ -51,6 +54,76 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     setIsEditProfileOpen(false);
   };
 
+  const addNotification = (userId: string, title: string, message: string) => {
+    const notifications: AppNotification[] = JSON.parse(localStorage.getItem('medi_notifications') || '[]');
+    notifications.push({
+      id: Math.random().toString(36).substr(2, 9),
+      userId,
+      title,
+      message,
+      timestamp: new Date().toISOString(),
+      isRead: false,
+      type: 'system'
+    });
+    localStorage.setItem('medi_notifications', JSON.stringify(notifications));
+    window.dispatchEvent(new Event('storage'));
+  };
+
+  const handleCancelAppointment = (id: string) => {
+    if (!confirm("Clinical Protocol: Are you sure you want to cancel this engagement? The specialist will be notified.")) return;
+
+    const allApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const idx = allApps.findIndex((a: Appointment) => a.id === id);
+    if (idx > -1) {
+      const app = allApps[idx];
+      app.status = 'cancelled';
+      localStorage.setItem('medi_appointments', JSON.stringify(allApps));
+      setAppointments(allApps.filter((a: Appointment) => a.patientId === user.id));
+      
+      // Notify Consultant
+      addNotification(
+        app.consultantId,
+        'Appointment Cancelled by Patient',
+        `${user.name} has cancelled their session scheduled for ${app.date} at ${app.time}.`
+      );
+    }
+  };
+
+  const handleRescheduleClick = (app: Appointment) => {
+    setRescheduleApp(app);
+    setIsReschedulingOpen(true);
+  };
+
+  const handleRescheduleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rescheduleApp) return;
+
+    const allApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const idx = allApps.findIndex((a: Appointment) => a.id === rescheduleApp.id);
+    if (idx > -1) {
+      const oldDate = allApps[idx].date;
+      const oldTime = allApps[idx].time;
+      
+      allApps[idx] = { 
+        ...rescheduleApp, 
+        status: 'pending' // Re-verify status after reschedule
+      };
+      
+      localStorage.setItem('medi_appointments', JSON.stringify(allApps));
+      setAppointments(allApps.filter((a: Appointment) => a.patientId === user.id));
+
+      // Notify Consultant
+      addNotification(
+        rescheduleApp.consultantId,
+        'Appointment Rescheduled',
+        `${user.name} moved their session from ${oldDate} at ${oldTime} to ${rescheduleApp.date} at ${rescheduleApp.time}.`
+      );
+
+      setIsReschedulingOpen(false);
+      setRescheduleApp(null);
+    }
+  };
+
   const handleBookAppointment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newApp.consultantId || !newApp.date || !newApp.time) return;
@@ -78,18 +151,11 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     setAppointments(updatedApps.filter(a => a.patientId === user.id));
     
     // Notify Consultant
-    const notifications: AppNotification[] = JSON.parse(localStorage.getItem('medi_notifications') || '[]');
-    notifications.push({
-      id: Math.random().toString(36).substr(2, 9),
-      userId: consultant.id,
-      title: 'New Appointment Request',
-      message: `${user.name} requested an appointment for ${newApp.date} at ${newApp.time}.`,
-      timestamp: new Date().toISOString(),
-      isRead: false,
-      type: 'system'
-    });
-    localStorage.setItem('medi_notifications', JSON.stringify(notifications));
-    window.dispatchEvent(new Event('storage'));
+    addNotification(
+      consultant.id,
+      'New Appointment Request',
+      `${user.name} requested an appointment for ${newApp.date} at ${newApp.time}.`
+    );
 
     setIsBookingOpen(false);
     setNewApp({ consultantId: '', date: '', time: '', notes: '' });
@@ -121,7 +187,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
 
       <div className="grid lg:grid-cols-3 gap-10">
         <div className="lg:col-span-1 space-y-8">
-          <section className="bg-white rounded-[3rem] border border-slate-100 p-8 shadow-xl shadow-slate-200/20">
+          <section className="bg-white rounded-[3rem] border border-slate-100 p-8 shadow-xl shadow-slate-200/40">
             <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-8">Clinical Vitals</h2>
             <div className="space-y-6">
               {[
@@ -153,7 +219,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
         </div>
 
         <div className="lg:col-span-2">
-          <section className="bg-white rounded-[3.5rem] border border-slate-100 p-10 shadow-xl shadow-slate-200/20">
+          <section className="bg-white rounded-[3.5rem] border border-slate-100 p-10 shadow-xl shadow-slate-200/40">
             <div className="flex items-center justify-between mb-10">
               <h2 className="text-xl font-black text-slate-900 tracking-tight">Clinical Engagements</h2>
               <button 
@@ -165,25 +231,44 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
             </div>
 
             <div className="space-y-6">
-              {appointments.length > 0 ? appointments.map((app) => (
+              {appointments.length > 0 ? [...appointments].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((app) => (
                 <div key={app.id} className="p-8 bg-slate-50 border border-slate-100 rounded-[2.5rem] flex flex-col md:flex-row justify-between items-start md:items-center gap-6 group hover:bg-white hover:border-emerald-200 hover:shadow-xl transition-all duration-300">
                   <div className="flex items-center space-x-6">
                     <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-sm group-hover:bg-emerald-50 transition">
-                      <svg className="w-7 h-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                      <svg className="w-7 h-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
                     </div>
                     <div>
                       <h4 className="text-lg font-black text-slate-900">Dr. {app.consultantName}</h4>
                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{app.date} • {app.time}</p>
                     </div>
                   </div>
-                  <div className="flex items-center space-x-4 w-full md:w-auto">
+                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                     <span className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border ${
                       app.status === 'confirmed' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
                       app.status === 'pending' ? 'bg-amber-50 text-amber-600 border-amber-100' :
+                      app.status === 'cancelled' ? 'bg-red-50 text-red-600 border-red-100' :
                       'bg-slate-100 text-slate-400 border-slate-200'
                     }`}>
                       {app.status}
                     </span>
+                    
+                    {app.status !== 'cancelled' && app.status !== 'completed' && (
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => handleRescheduleClick(app)}
+                          className="px-5 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition"
+                        >
+                          Reschedule
+                        </button>
+                        <button 
+                          onClick={() => handleCancelAppointment(app.id)}
+                          className="px-5 py-2 bg-white border border-slate-200 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-red-500 hover:bg-red-50 transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+
                     {app.status === 'confirmed' && (
                       <button 
                         onClick={() => navigate('/dashboard')}
@@ -197,7 +282,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
               )) : (
                 <div className="py-20 text-center bg-slate-50/50 rounded-[3rem] border-2 border-dashed border-slate-200">
                   <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-slate-200 shadow-sm">
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
                   </div>
                   <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">No clinical records found in the portal</p>
                 </div>
@@ -207,7 +292,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Booking Modal */}
       {isBookingOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsBookingOpen(false)}></div>
@@ -251,6 +336,46 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
         </div>
       )}
 
+      {/* Rescheduling Modal */}
+      {isReschedulingOpen && rescheduleApp && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsReschedulingOpen(false)}></div>
+          <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10">
+            <h3 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">Reschedule Engagement</h3>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-8">Consultant: Dr. {rescheduleApp.consultantName}</p>
+            <form onSubmit={handleRescheduleSubmit} className="space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">New Date</label>
+                  <input 
+                    type="date" 
+                    required 
+                    value={rescheduleApp.date} 
+                    onChange={(e) => setRescheduleApp({...rescheduleApp, date: e.target.value})} 
+                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" 
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">New Slot</label>
+                  <select 
+                    required 
+                    value={rescheduleApp.time} 
+                    onChange={(e) => setRescheduleApp({...rescheduleApp, time: e.target.value})} 
+                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition"
+                  >
+                    {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition shadow-xl shadow-slate-200">
+                Sync Rescheduling Request
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Profile Edit Modal */}
       {isEditProfileOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsEditProfileOpen(false)}></div>
