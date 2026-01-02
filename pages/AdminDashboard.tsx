@@ -29,10 +29,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const [allConsultants, setAllConsultants] = useState<User[]>([]);
   const [pendingConsultants, setPendingConsultants] = useState<User[]>([]);
   const [admins, setAdmins] = useState<User[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   
   // Forms visibility
   const [showAddConsultant, setShowAddConsultant] = useState(false);
   const [showAddAdmin, setShowAddAdmin] = useState(false);
+  const [showSyncPanel, setShowSyncPanel] = useState(false);
   
   // New Consultant Form
   const [newCName, setNewCName] = useState('');
@@ -43,7 +45,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const [newAdminName, setNewAdminName] = useState('');
   const [newAdminEmail, setNewAdminEmail] = useState('');
 
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  // Sync Token state
+  const [syncToken, setSyncToken] = useState('');
 
   // Mock analytics for graphs
   const registrationTrend = [
@@ -61,7 +64,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     const storedTrans: Transaction[] = JSON.parse(localStorage.getItem('medi_transactions') || '[]');
     const storedLogs: AuditLog[] = JSON.parse(localStorage.getItem('medi_audit_logs') || '[]');
     
-    // Calculate Stats
     const totalPatients = storedUsers.filter(u => u.role === UserRole.PATIENT).length;
     const activeConsultants = storedUsers.filter(u => u.role === UserRole.CONSULTANT && u.isApproved).length;
     const today = new Date().toISOString().split('T')[0];
@@ -75,7 +77,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       { label: 'Platform Revenue', value: `$${totalRevenue.toLocaleString()}`, trend: 'Actual Total', color: 'indigo' },
     ]);
 
-    // Update Rosters
     setAllConsultants(storedUsers.filter(u => u.role === UserRole.CONSULTANT && u.isApproved));
     setPendingConsultants(storedUsers.filter(u => u.role === UserRole.CONSULTANT && !u.isApproved));
     setAdmins(storedUsers.filter(u => u.role === UserRole.ADMIN));
@@ -84,9 +85,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
   useEffect(() => {
     syncData();
+    window.addEventListener('storage', syncData);
     const interval = setInterval(syncData, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      window.removeEventListener('storage', syncData);
+      clearInterval(interval);
+    };
   }, []);
+
+  const generateSyncToken = () => {
+    const data = {
+      users: localStorage.getItem('medi_registered_users'),
+      apps: localStorage.getItem('medi_appointments'),
+      trans: localStorage.getItem('medi_transactions'),
+      logs: localStorage.getItem('medi_audit_logs'),
+      avail: localStorage.getItem('medi_availability'),
+      notifs: localStorage.getItem('medi_notifications')
+    };
+    const token = btoa(JSON.stringify(data));
+    setSyncToken(token);
+  };
+
+  const copyToken = () => {
+    navigator.clipboard.writeText(syncToken);
+    alert("System Sync Token copied. Use this on another device/browser to mirror the hospital database.");
+  };
 
   const pushAuditLog = (action: string, target: string) => {
     const newLog: AuditLog = { 
@@ -121,6 +144,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     
     users.push(newC);
     localStorage.setItem('medi_registered_users', JSON.stringify(users));
+    window.dispatchEvent(new Event('storage'));
     pushAuditLog('Onboarded Specialist', newC.name);
     
     setNewCName('');
@@ -148,6 +172,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
     users.push(newAdmin);
     localStorage.setItem('medi_registered_users', JSON.stringify(users));
+    window.dispatchEvent(new Event('storage'));
     pushAuditLog('Authorized Admin', newAdmin.name);
     
     setNewAdminName('');
@@ -165,6 +190,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       const users = JSON.parse(localStorage.getItem('medi_registered_users') || '[]');
       const filtered = users.filter((u: User) => u.id !== id);
       localStorage.setItem('medi_registered_users', JSON.stringify(filtered));
+      window.dispatchEvent(new Event('storage'));
       pushAuditLog('Admin Access Revoked', id);
       syncData();
     }
@@ -174,6 +200,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     const users = JSON.parse(localStorage.getItem('medi_registered_users') || '[]');
     const updated = users.map((u: User) => u.id === id ? { ...u, isApproved: true } : u);
     localStorage.setItem('medi_registered_users', JSON.stringify(updated));
+    window.dispatchEvent(new Event('storage'));
     pushAuditLog('Consultant Verified', id);
     syncData();
   };
@@ -185,8 +212,42 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">MediSphere Central</h1>
           <p className="text-slate-500 font-medium">Health System Infrastructure Dashboard</p>
         </div>
-        <div className="bg-indigo-600 px-4 py-2 rounded-xl text-white text-[10px] font-black uppercase tracking-widest shadow-xl">Admin Node Active</div>
+        <div className="flex items-center space-x-4">
+          <button 
+            onClick={() => { setShowSyncPanel(!showSyncPanel); if(!showSyncPanel) generateSyncToken(); }}
+            className="px-4 py-2 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-emerald-600 transition shadow-xl"
+          >
+            System Sync Tool
+          </button>
+          <div className="bg-indigo-600 px-4 py-2 rounded-xl text-white text-[10px] font-black uppercase tracking-widest shadow-xl">Admin Node Active</div>
+        </div>
       </div>
+
+      {/* Sync Token Panel */}
+      {showSyncPanel && (
+        <section className="mb-10 bg-emerald-50 border-2 border-emerald-100 p-8 rounded-[2.5rem] animate-in slide-in-from-top-4 duration-500">
+          <div className="flex flex-col md:flex-row justify-between gap-8 items-start">
+            <div className="max-w-md">
+              <h3 className="text-xl font-black text-emerald-900 mb-2">Clinical Data Portability</h3>
+              <p className="text-sm text-emerald-700 font-medium leading-relaxed">
+                Because Byinks Health uses secure local storage, data on your "another device" may be out of sync. 
+                Generate a token below to copy the entire hospital database to your clipboard, then "Import" it on your other device.
+              </p>
+            </div>
+            <div className="flex-grow w-full space-y-4">
+              <textarea 
+                readOnly 
+                value={syncToken} 
+                className="w-full h-24 p-4 bg-white border-2 border-emerald-100 rounded-2xl text-[8px] font-mono text-emerald-600 break-all overflow-y-auto"
+              />
+              <div className="flex space-x-3">
+                <button onClick={copyToken} className="bg-emerald-600 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition">Copy Sync Token</button>
+                <button onClick={generateSyncToken} className="bg-white border-2 border-emerald-100 text-emerald-600 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-50 transition">Refresh State</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Stats Grid */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
@@ -202,10 +263,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       </div>
 
       <div className="grid lg:grid-cols-12 gap-8">
-        {/* Left Column: Governance & Audit */}
         <div className="lg:col-span-4 space-y-8">
-          
-          {/* Team Governance Section */}
           <section className="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl text-white">
             <div className="flex items-center justify-between mb-8">
               <h2 className="text-xs font-black uppercase tracking-[0.2em] text-indigo-400">Team Governance</h2>
@@ -227,7 +285,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
               </div>
             </div>
 
-            {/* Add Consultant Form */}
             {showAddConsultant && (
               <form onSubmit={handleAddConsultantDirect} className="mb-8 space-y-3 bg-white/5 p-6 rounded-3xl border border-white/5 animate-in slide-in-from-top-4">
                 <p className="text-[10px] font-black text-blue-400 uppercase mb-2">New Medical Specialist</p>
@@ -238,7 +295,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
               </form>
             )}
 
-            {/* Add Admin Form */}
             {showAddAdmin && (
               <form onSubmit={handleAddAdmin} className="mb-8 space-y-3 bg-indigo-900/20 p-6 rounded-3xl border border-indigo-500/20 animate-in slide-in-from-top-4">
                 <p className="text-[10px] font-black text-indigo-400 uppercase mb-2">New Infrastructure Admin</p>
@@ -248,7 +304,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
               </form>
             )}
 
-            {/* Admin Roster */}
             <div className="space-y-4">
               <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">System Administrators</p>
               {admins.map(adm => (
@@ -270,7 +325,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             </div>
           </section>
 
-          {/* Pending Verifications */}
           {pendingConsultants.length > 0 && (
             <section className="bg-amber-50 p-8 rounded-[2.5rem] border border-amber-200 shadow-sm animate-pulse-slow">
               <h2 className="text-xs font-black uppercase tracking-[0.2em] text-amber-600 mb-6">Pending Verifications</h2>
@@ -293,7 +347,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             </section>
           )}
 
-          {/* Audit Trail */}
           <section className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
             <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-6">Audit Trail</h2>
             <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
@@ -310,10 +363,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           </section>
         </div>
 
-        {/* Right Column: Analytics & Specialist Roster */}
         <div className="lg:col-span-8 space-y-8">
-          
-          {/* Revenue Chart */}
           <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
             <div className="mb-10 flex justify-between items-center">
               <div>
@@ -345,7 +395,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             </div>
           </div>
 
-          {/* Clinical Specialist Network */}
           <section className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-8 border-b border-slate-100 bg-slate-50/30">
               <h2 className="text-xl font-black text-slate-900 tracking-tight">Verified Specialist Network</h2>
