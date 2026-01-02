@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Appointment, UserRole, AppNotification } from '../types.ts';
 import { useNavigate } from 'react-router-dom';
+import { ClinicalAPI } from '../services/apiService.ts';
 
 interface PatientProfileProps {
   user: User;
@@ -52,6 +53,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     e.preventDefault();
     onUpdateUser({ ...user, ...editData });
     setIsEditProfileOpen(false);
+    ClinicalAPI.broadcastSystemEvent('PROFILE_UPDATE', { userId: user.id });
   };
 
   const addNotification = (userId: string, title: string, message: string) => {
@@ -67,6 +69,9 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     });
     localStorage.setItem('medi_notifications', JSON.stringify(notifications));
     window.dispatchEvent(new Event('storage'));
+    
+    // Broadcast for cloud sync
+    ClinicalAPI.broadcastSystemEvent('NOTIFICATION_CREATED', { userId });
   };
 
   const handleCancelAppointment = (id: string) => {
@@ -86,7 +91,23 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
         'Appointment Cancelled by Patient',
         `${user.name} has cancelled their session scheduled for ${app.date} at ${app.time}.`
       );
+
+      // Cloud Pulse
+      ClinicalAPI.broadcastSystemEvent('APPOINTMENT_UPDATED', { appointmentId: id, patientId: user.id, consultantId: app.consultantId });
     }
+  };
+
+  const handleDeleteAppointment = (id: string) => {
+    if (!confirm("Clinical Record Purge: Are you sure you want to permanently remove this appointment from your history? This action cannot be undone.")) return;
+
+    const allApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const filteredApps = allApps.filter((a: Appointment) => a.id !== id);
+    localStorage.setItem('medi_appointments', JSON.stringify(filteredApps));
+    setAppointments(filteredApps.filter((a: Appointment) => a.patientId === user.id));
+    
+    // Broadcast change to other tabs and other devices
+    window.dispatchEvent(new Event('storage'));
+    ClinicalAPI.broadcastSystemEvent('APPOINTMENT_DELETED', { appointmentId: id, userId: user.id });
   };
 
   const handleRescheduleClick = (app: Appointment) => {
@@ -118,6 +139,9 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
         'Appointment Rescheduled',
         `${user.name} moved their session from ${oldDate} at ${oldTime} to ${rescheduleApp.date} at ${rescheduleApp.time}.`
       );
+
+      // Cloud Pulse
+      ClinicalAPI.broadcastSystemEvent('APPOINTMENT_UPDATED', { appointmentId: rescheduleApp.id, patientId: user.id, consultantId: rescheduleApp.consultantId });
 
       setIsReschedulingOpen(false);
       setRescheduleApp(null);
@@ -156,6 +180,9 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
       'New Appointment Request',
       `${user.name} requested an appointment for ${newApp.date} at ${newApp.time}.`
     );
+
+    // Cloud Pulse
+    ClinicalAPI.broadcastSystemEvent('APPOINTMENT_CREATED', { appointmentId: appointment.id, patientId: user.id, consultantId: consultant.id });
 
     setIsBookingOpen(false);
     setNewApp({ consultantId: '', date: '', time: '', notes: '' });
@@ -252,22 +279,33 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
                       {app.status}
                     </span>
                     
-                    {app.status !== 'cancelled' && app.status !== 'completed' && (
-                      <div className="flex items-center gap-2">
-                        <button 
-                          onClick={() => handleRescheduleClick(app)}
-                          className="px-5 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition"
-                        >
-                          Reschedule
-                        </button>
-                        <button 
-                          onClick={() => handleCancelAppointment(app.id)}
-                          className="px-5 py-2 bg-white border border-slate-200 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-red-500 hover:bg-red-50 transition"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {app.status !== 'cancelled' && app.status !== 'completed' && (
+                        <>
+                          <button 
+                            onClick={() => handleRescheduleClick(app)}
+                            className="px-5 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition"
+                          >
+                            Reschedule
+                          </button>
+                          <button 
+                            onClick={() => handleCancelAppointment(app.id)}
+                            className="px-5 py-2 bg-white border border-slate-200 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-red-500 hover:bg-red-50 transition"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                      
+                      {/* Delete History Button */}
+                      <button 
+                        onClick={() => handleDeleteAppointment(app.id)}
+                        className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-500 hover:border-red-200 transition"
+                        title="Delete from History"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
 
                     {app.status === 'confirmed' && (
                       <button 

@@ -77,7 +77,17 @@ const App: React.FC = () => {
 
     checkSession();
 
-    let subscription: any = null;
+    // Setup Cross-Device Global Sync Listener
+    const systemChannel = ClinicalAPI.subscribeToGlobalSystem((payload) => {
+      console.log("Cloud Sync Event Received:", payload.type);
+      // Trigger a local refresh by firing a storage event manually
+      // Components like PatientDashboard/ConsultantDashboard listen for 'storage'
+      window.dispatchEvent(new Event('storage'));
+      
+      // If we are on the Admin Dashboard or similar, this will force re-fetches
+    });
+
+    let authSubscription: any = null;
     if (ClinicalAPI.isConfigured()) {
       const { data } = supabase!.auth.onAuthStateChange(async (event, session) => {
         if (session) {
@@ -87,10 +97,13 @@ const App: React.FC = () => {
           setUser(null);
         }
       });
-      subscription = data.subscription;
+      authSubscription = data.subscription;
     }
 
-    return () => subscription?.unsubscribe();
+    return () => {
+      authSubscription?.unsubscribe();
+      systemChannel?.unsubscribe();
+    };
   }, []);
 
   const handleLogin = (u: User) => {

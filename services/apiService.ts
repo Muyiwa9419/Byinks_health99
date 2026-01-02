@@ -35,6 +35,28 @@ export const ClinicalAPI = {
   },
 
   /**
+   * Global System Event Bus for cross-device state sync
+   */
+  subscribeToGlobalSystem(onEvent: (payload: any) => void): RealtimeChannel | null {
+    if (!supabase) return null;
+    return supabase.channel('global_clinical_system')
+      .on('broadcast', { event: 'system_update' }, ({ payload }) => {
+        onEvent(payload);
+      })
+      .subscribe();
+  },
+
+  broadcastSystemEvent(type: string, data: any) {
+    if (supabase) {
+      supabase.channel('global_clinical_system').send({
+        type: 'broadcast',
+        event: 'system_update',
+        payload: { type, data, timestamp: Date.now() },
+      });
+    }
+  },
+
+  /**
    * Subscribes to cross-device messages using Supabase Realtime
    */
   subscribeToClinicalCloud(chatId: string, onMessage: (msg: any) => void): RealtimeChannel | null {
@@ -153,6 +175,7 @@ export const ClinicalAPI = {
     const idx = users.findIndex(u => u.id === user.id);
     if (idx > -1) users[idx] = user; else users.push(user);
     saveLocalCollection('registered_users', users);
+    this.broadcastSystemEvent('USER_UPDATE', { userId: user.id });
   },
 
   async updateUserStatus(userId: string, updates: Partial<User>): Promise<void> {
@@ -161,6 +184,7 @@ export const ClinicalAPI = {
     if (idx > -1) {
       users[idx] = { ...users[idx], ...updates };
       saveLocalCollection('registered_users', users);
+      this.broadcastSystemEvent('USER_UPDATE', { userId });
     }
   },
 
@@ -174,6 +198,7 @@ export const ClinicalAPI = {
     if (idx > -1) {
       syncs[idx].status = status;
       saveLocalCollection('sync_requests', syncs);
+      this.broadcastSystemEvent('SYNC_UPDATE', { requestId });
     }
   }
 };
