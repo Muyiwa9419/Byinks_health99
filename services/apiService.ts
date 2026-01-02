@@ -6,6 +6,7 @@ import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest 
  * Clinical Hybrid API Service
  * Primary: Supabase Cloud
  * Fallback: Local Persisted Simulation (Cloud Vault)
+ * Real-time: BroadcastChannel Bridge
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -15,15 +16,23 @@ export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
 
+// Global Bridge for cross-tab real-time reflection
+const clinicalBridge = new BroadcastChannel('medi_clinical_bridge');
+
 const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getItem(`medi_${key}`) || '[]');
 const saveLocalCollection = <T>(key: string, data: T[]) => {
   localStorage.setItem(`medi_${key}`, JSON.stringify(data));
+  clinicalBridge.postMessage({ type: 'REFRESH_COLLECTION', key });
   window.dispatchEvent(new Event('storage'));
 };
 
 export const ClinicalAPI = {
   isConfigured(): boolean {
     return !!supabase;
+  },
+
+  getBridge() {
+    return clinicalBridge;
   },
 
   /**
@@ -47,6 +56,7 @@ export const ClinicalAPI = {
     Object.entries(snapshot).forEach(([key, value]) => {
       localStorage.setItem(key, value);
     });
+    clinicalBridge.postMessage({ type: 'FULL_RESTORE' });
     window.dispatchEvent(new Event('storage'));
   },
 
@@ -60,6 +70,7 @@ export const ClinicalAPI = {
       lastSync: new Date().toISOString()
     };
     localStorage.setItem('medi_cloud_vault', JSON.stringify(vault));
+    clinicalBridge.postMessage({ type: 'CLOUD_PUSH', email });
     window.dispatchEvent(new Event('storage'));
   },
 
@@ -94,6 +105,10 @@ export const ClinicalAPI = {
 
   async adminCreateUser(profile: User): Promise<User> {
     const users = getLocalCollection<User>('registered_users');
+    // Ensure uniqueness by email
+    const existing = users.find(u => u.email.toLowerCase() === profile.email.toLowerCase());
+    if (existing) return existing;
+
     const newUser = { ...profile, id: profile.id || Math.random().toString(36).substr(2, 9), isApproved: true };
     users.push(newUser);
     saveLocalCollection('registered_users', users);
@@ -110,6 +125,7 @@ export const ClinicalAPI = {
 
   async signOut() {
     localStorage.removeItem('medi_local_session');
+    clinicalBridge.postMessage({ type: 'SIGN_OUT' });
   },
 
   // --- PROFILE OPERATIONS ---
@@ -137,16 +153,19 @@ export const ClinicalAPI = {
     }
   },
 
+  // --- SYNC OPERATIONS ---
+  // Added getSyncRequests to resolve error in AdminDashboard line 45
   async getSyncRequests(): Promise<SyncRequest[]> {
     return getLocalCollection<SyncRequest>('sync_requests');
   },
 
+  // Added updateSyncRequestStatus to resolve error in AdminDashboard line 93
   async updateSyncRequestStatus(requestId: string, status: 'approved' | 'rejected'): Promise<void> {
-    const requests = getLocalCollection<SyncRequest>('sync_requests');
-    const idx = requests.findIndex(r => r.id === requestId);
+    const syncs = getLocalCollection<SyncRequest>('sync_requests');
+    const idx = syncs.findIndex(r => r.id === requestId);
     if (idx > -1) {
-      requests[idx].status = status;
-      saveLocalCollection('sync_requests', requests);
+      syncs[idx].status = status;
+      saveLocalCollection('sync_requests', syncs);
     }
   }
 };

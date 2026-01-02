@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { User, UserRole, Appointment, ConsultantAvailability, AppNotification } from '../types.ts';
 import { summarizePatientHistory } from '../services/geminiService.ts';
 import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
+import { ClinicalAPI } from '../services/apiService.ts';
 
 interface ConsultantDashboardProps {
   user: User;
@@ -32,31 +33,29 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
 
   const timeSlots = ['08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
 
-  // Sync data from localStorage
+  // Sync data from local storage and listeners
   useEffect(() => {
     const fetchData = () => {
       // 1. Fetch Appointments
-      const storedApps = localStorage.getItem('medi_appointments');
-      if (storedApps) {
-        const all = JSON.parse(storedApps);
-        setAppointments(all.filter((a: Appointment) => a.consultantId === user.id));
-      }
+      const storedAppsStr = localStorage.getItem('medi_appointments');
+      const allApps: Appointment[] = storedAppsStr ? JSON.parse(storedAppsStr) : [];
+      const myApps = allApps.filter((a: Appointment) => a.consultantId === user.id);
+      setAppointments(myApps);
 
       // 2. Fetch Availability
-      const storedAvail = localStorage.getItem('medi_availability');
-      if (storedAvail) {
-        const allAvail: ConsultantAvailability[] = JSON.parse(storedAvail);
-        const myAvail = allAvail.find(a => a.consultantId === user.id);
-        if (myAvail) setAvailability(myAvail);
-      }
+      const storedAvailStr = localStorage.getItem('medi_availability');
+      const allAvail: ConsultantAvailability[] = storedAvailStr ? JSON.parse(storedAvailStr) : [];
+      const myAvail = allAvail.find(a => a.consultantId === user.id);
+      if (myAvail) setAvailability(myAvail);
 
-      // 3. Discover Real Patients from Chat History and Registered Users
+      // 3. Discover Unique Patients (from history and appointments)
       const registeredUsersStr = localStorage.getItem('medi_registered_users') || '[]';
       const registeredUsers: User[] = JSON.parse(registeredUsersStr);
       const patients = registeredUsers.filter(u => u.role === UserRole.PATIENT);
 
-      const discoveredPatients: ChatPatient[] = [];
+      const patientMap = new Map<string, ChatPatient>();
       
+      // Discover from Chat keys
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key?.startsWith('chat_') && key.includes(user.id)) {
@@ -66,37 +65,51 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
           
           if (patientRecord) {
             const history = JSON.parse(localStorage.getItem(key) || '[]');
-            discoveredPatients.push({
+            patientMap.set(patientRecord.id, {
               id: patientRecord.id,
               name: patientRecord.name,
               email: patientRecord.email,
-              lastMessage: history.length > 0 ? history[history.length - 1].text : 'No messages yet'
+              lastMessage: history.length > 0 ? history[history.length - 1].text || 'Clinical Asset Shared' : 'No messages'
             });
           }
         }
       }
       
-      appointments.forEach(app => {
-        if (!discoveredPatients.find(p => p.id === app.patientId)) {
+      // Merge with Appointment records
+      myApps.forEach(app => {
+        if (!patientMap.has(app.patientId)) {
           const patientRecord = patients.find(p => p.id === app.patientId);
           if (patientRecord) {
-            discoveredPatients.push({
+            patientMap.set(patientRecord.id, {
               id: patientRecord.id,
               name: patientRecord.name,
               email: patientRecord.email,
-              lastMessage: 'Appointment Scheduled'
+              lastMessage: 'Session Requested'
             });
           }
         }
       });
 
-      setActiveChatPatients(discoveredPatients);
+      setActiveChatPatients(Array.from(patientMap.values()));
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 5000); 
-    return () => clearInterval(interval);
-  }, [user.id, appointments.length]);
+
+    // Listen to real-time sync pulse
+    const bridge = ClinicalAPI.getBridge();
+    const handleBridgeMessage = (e: MessageEvent) => {
+      if (e.data.type === 'REFRESH_COLLECTION' || e.data.type === 'FULL_RESTORE') {
+        fetchData();
+      }
+    };
+    bridge.addEventListener('message', handleBridgeMessage);
+    window.addEventListener('storage', fetchData);
+
+    return () => {
+      bridge.removeEventListener('message', handleBridgeMessage);
+      window.removeEventListener('storage', fetchData);
+    };
+  }, [user.id]);
 
   const addNotification = (userId: string, title: string, message: string, appId?: string) => {
     const notifications: AppNotification[] = JSON.parse(localStorage.getItem('medi_notifications') || '[]');
@@ -143,6 +156,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       storedAvail.push(newAvailability);
     }
     localStorage.setItem('medi_availability', JSON.stringify(storedAvail));
+    window.dispatchEvent(new Event('storage'));
   };
 
   const updateAppStatus = (id: string, status: Appointment['status']) => {
@@ -161,6 +175,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
         `Dr. ${user.name} has ${statusLabel.toLowerCase()} your appointment for ${app.date} at ${app.time}.`,
         app.id
       );
+      window.dispatchEvent(new Event('storage'));
     }
   };
 
@@ -217,24 +232,24 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-6">
         <div>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Welcome, Dr. {user.name.split(' ')[0]}</h1>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Dr. {user.name}</h1>
           <div className="flex items-center mt-2 space-x-3">
             <span className="px-4 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-100">
               {user.specialty || 'Medical Specialist'}
             </span>
-            <span className="flex items-center text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50/50 px-3 py-1.5 rounded-full">
+            <span className="flex items-center text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50/50 px-3 py-1.5 rounded-full border border-emerald-100/50">
               <span className="w-2 h-2 bg-emerald-500 rounded-full mr-2 animate-pulse"></span>
-              Clinical Node Online
+              Clinical Node Active
             </span>
           </div>
         </div>
         <div className="flex items-center space-x-4">
           <div className="bg-white px-8 py-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center">
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Queue</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Intake Queue</span>
             <span className="text-2xl font-black text-amber-500">{pending.length}</span>
           </div>
           <div className="bg-white px-8 py-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center">
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Confirmed</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Confirmed Cases</span>
             <span className="text-2xl font-black text-emerald-600">{appointments.filter(a => a.status === 'confirmed').length}</span>
           </div>
         </div>
@@ -245,7 +260,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
         <div className="lg:col-span-4 space-y-8">
           <section className="bg-white rounded-[3rem] border border-slate-100 p-8 shadow-xl shadow-slate-200/40">
             <div className="flex items-center justify-between mb-8">
-              <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-900">Medical Schedule</h2>
+              <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-900">Clinical Schedule</h2>
               <div className="flex space-x-2">
                 <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-slate-50 rounded-xl transition text-slate-400">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
@@ -363,7 +378,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
             
             {/* Horizontal Patient Roster */}
             <div className="mb-12">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-6">Patient Stream</h3>
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-6">Live Patient Stream</h3>
               <div className="flex space-x-6 overflow-x-auto pb-4 custom-scrollbar">
                 {activeChatPatients.length > 0 ? activeChatPatients.map((p) => (
                   <button
@@ -384,12 +399,12 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                     <div className={`text-[9px] font-bold uppercase tracking-widest truncate w-full ${
                       selectedPatient?.id === p.id ? 'text-emerald-100' : 'text-slate-400'
                     }`}>
-                      {p.lastMessage || 'New Session'}
+                      {p.lastMessage || 'Open Session'}
                     </div>
                   </button>
                 )) : (
                   <div className="w-full py-12 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem]">
-                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">No active patient sessions discovered</p>
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">No active patient sessions detected</p>
                   </div>
                 )}
               </div>
@@ -413,34 +428,34 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                       className="bg-slate-900 text-white px-8 py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition-all shadow-xl flex items-center"
                     >
                       <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-                      Secure Communication Hub
+                      Secure Interaction Hub
                     </button>
                     <button
-                      onClick={() => handleSummarize(selectedPatient.lastMessage || 'No recent clinical input available.')}
+                      onClick={() => handleSummarize(selectedPatient.lastMessage || 'Clinical data awaiting ingestion.')}
                       disabled={loading}
                       className="bg-white border border-slate-200 text-slate-900 px-8 py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:border-emerald-600 hover:text-emerald-600 transition-all shadow-sm flex items-center"
                     >
                       {loading && (
                         <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                       )}
-                      Sync AI Context
+                      Generate AI Snapshot
                     </button>
                   </div>
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-12 flex-grow mb-12">
                   <div className="space-y-6">
-                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Patient Dialogue History</h3>
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Clinical Dialogue History</h3>
                     <div className="p-10 bg-slate-50 rounded-[3rem] border border-slate-100 text-slate-700 leading-relaxed text-sm min-h-[300px] shadow-inner font-medium italic relative">
                       <div className="absolute top-6 right-8 opacity-10">
                         <svg className="w-16 h-16" fill="currentColor" viewBox="0 0 24 24"><path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.987z"/></svg>
                       </div>
-                      {selectedPatient.lastMessage || 'Initial clinical encounter records...'}
+                      {selectedPatient.lastMessage || 'Patient metadata and session start...'}
                     </div>
                   </div>
 
                   <div className="space-y-6">
-                    <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em]">Clinical Intelligence Summary</h3>
+                    <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em]">AI Clinical Synthesis</h3>
                     {summary ? (
                       <div className="p-10 bg-emerald-50/50 rounded-[3rem] border border-emerald-100 text-slate-800 font-medium animate-in fade-in duration-1000 min-h-[300px] text-sm leading-relaxed shadow-sm relative">
                          <div className="absolute top-6 right-8 opacity-20 text-emerald-600">
@@ -453,7 +468,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                         <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm">
                           <svg className="w-8 h-8 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                         </div>
-                        <p className="max-w-[200px] leading-relaxed">Activate AI Context Engine to synthesize clinical input and history patterns.</p>
+                        <p className="max-w-[200px] leading-relaxed">Clinical Intelligence engine ready. Request a summary to distill patterns.</p>
                       </div>
                     )}
                   </div>
@@ -462,15 +477,15 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                 <div className="mt-auto bg-slate-900 p-10 rounded-[3rem] text-white shadow-2xl overflow-hidden relative">
                   <h3 className="text-xs font-black text-emerald-400 uppercase tracking-[0.3em] mb-6 flex items-center relative z-10">
                     <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                    Scribe Notes & Observations
+                    Practitioner Scribe Notes
                   </h3>
                   <textarea 
                     className="w-full p-8 bg-white/5 border border-white/10 rounded-[2rem] focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none h-40 transition text-white placeholder-slate-600 resize-none text-sm font-medium relative z-10 backdrop-blur-md"
-                    placeholder="Document clinical session findings, diagnosis recommendations, and next steps..."
+                    placeholder="Document clinical session observations, tentative diagnosis, and therapeutic plan..."
                   />
                   <div className="mt-8 flex space-x-4 relative z-10">
-                    <button className="flex-grow bg-emerald-600 text-white py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-500 transition shadow-xl shadow-emerald-950/40">Authorize Medical Sync</button>
-                    <button className="px-10 bg-white/5 border border-white/10 text-white/60 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-white/10 transition">Archive Draft</button>
+                    <button className="flex-grow bg-emerald-600 text-white py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-500 transition shadow-xl shadow-emerald-950/40">Finalize Medical Record</button>
+                    <button className="px-10 bg-white/5 border border-white/10 text-white/60 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-white/10 transition">Save Draft</button>
                   </div>
                   <div className="absolute -top-24 -right-24 w-64 h-64 bg-emerald-600/10 rounded-full blur-3xl"></div>
                 </div>
@@ -480,9 +495,9 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                 <div className="w-32 h-32 bg-emerald-50 text-emerald-600 rounded-[2.5rem] flex items-center justify-center mb-12 shadow-xl shadow-emerald-100 transform -rotate-12 hover:rotate-0 transition-transform duration-700">
                   <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
                 </div>
-                <h3 className="text-4xl font-black text-slate-900 mb-6 tracking-tight">Clinical Care Command</h3>
+                <h3 className="text-4xl font-black text-slate-900 mb-6 tracking-tight">Select Patient</h3>
                 <p className="text-slate-500 max-w-md leading-relaxed text-base font-medium">
-                  The clinical stream is currently quiet. Select a patient from your stream above or check the intake queue to initiate a new session.
+                  Your clinical stream is active. Select a patient from the roster above to view history or initiate a secure session.
                 </p>
               </div>
             )}
