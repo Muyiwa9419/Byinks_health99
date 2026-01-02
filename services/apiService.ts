@@ -5,7 +5,7 @@ import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest 
 /**
  * Clinical Hybrid API Service
  * Primary: Supabase Cloud
- * Fallback: Local Persisted Simulation
+ * Fallback: Local Persisted Simulation (Cloud Vault)
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -18,7 +18,11 @@ export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
 let localUser: User | null = JSON.parse(localStorage.getItem('medi_local_session') || 'null');
 
 const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getItem(`medi_${key}`) || '[]');
-const saveLocalCollection = <T>(key: string, data: T[]) => localStorage.setItem(`medi_${key}`, JSON.stringify(data));
+const saveLocalCollection = <T>(key: string, data: T[]) => {
+  localStorage.setItem(`medi_${key}`, JSON.stringify(data));
+  // CRITICAL: Dispatch event to trigger UI updates in all active tabs/components
+  window.dispatchEvent(new Event('storage'));
+};
 
 export const ClinicalAPI = {
   isConfigured(): boolean {
@@ -26,10 +30,25 @@ export const ClinicalAPI = {
   },
 
   /**
-   * Seeds the hospital with default specialists if the registry is empty.
+   * Simulated Cloud Vault for Email-Only Sync
    */
+  pushToCloud(email: string, payload: any) {
+    const vault = JSON.parse(localStorage.getItem('medi_cloud_vault') || '{}');
+    vault[email.toLowerCase()] = {
+      ...payload,
+      lastSync: new Date().toISOString()
+    };
+    localStorage.setItem('medi_cloud_vault', JSON.stringify(vault));
+    window.dispatchEvent(new Event('storage'));
+  },
+
+  pullFromCloud(email: string) {
+    const vault = JSON.parse(localStorage.getItem('medi_cloud_vault') || '{}');
+    return vault[email.toLowerCase()] || null;
+  },
+
   seedDefaultData() {
-    if (this.isConfigured()) return; // Cloud manages its own data
+    if (this.isConfigured()) return;
 
     const users = getLocalCollection<User>('registered_users');
     if (users.length === 0) {
@@ -71,7 +90,6 @@ export const ClinicalAPI = {
       ];
       saveLocalCollection('registered_users', defaultDoctors);
       
-      // Seed some initial wellness tips if none exist
       const notifications: AppNotification[] = [
         {
           id: 'welcome-notif',
@@ -84,7 +102,6 @@ export const ClinicalAPI = {
         }
       ];
       saveLocalCollection('notifications', notifications);
-      window.dispatchEvent(new Event('storage'));
     }
   },
 
@@ -98,7 +115,7 @@ export const ClinicalAPI = {
       return userWithId;
     } else {
       const users = getLocalCollection<User>('registered_users');
-      if (users.find(u => u.email === email)) throw new Error("Email already registered locally.");
+      if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) throw new Error("Email already registered locally.");
       const newUser = { ...profile, id: Math.random().toString(36).substr(2, 9) };
       users.push(newUser);
       saveLocalCollection('registered_users', users);
@@ -152,59 +169,6 @@ export const ClinicalAPI = {
     localStorage.removeItem('medi_local_session');
   },
 
-  // --- SYNC REQUEST OPERATIONS ---
-  async submitSyncRequest(token: string, requesterEmail: string): Promise<string> {
-    const request: SyncRequest = {
-      id: Math.random().toString(36).substr(2, 9),
-      requesterEmail,
-      deviceInfo: navigator.userAgent.split(')')[0].split('(')[1] || 'Unknown Device',
-      token,
-      status: 'pending',
-      timestamp: new Date().toISOString()
-    };
-
-    if (this.isConfigured()) {
-      const { error } = await supabase!.from('sync_requests').insert(request);
-      if (error) throw error;
-    } else {
-      const requests = getLocalCollection<SyncRequest>('sync_requests');
-      requests.push(request);
-      saveLocalCollection('sync_requests', requests);
-    }
-    return request.id;
-  },
-
-  async getSyncRequests(): Promise<SyncRequest[]> {
-    if (this.isConfigured()) {
-      const { data, error } = await supabase!.from('sync_requests').select('*').order('timestamp', { ascending: false });
-      return error ? [] : data;
-    } else {
-      return getLocalCollection<SyncRequest>('sync_requests');
-    }
-  },
-
-  async getSyncRequestStatus(requestId: string): Promise<SyncRequest | null> {
-    if (this.isConfigured()) {
-      const { data, error } = await supabase!.from('sync_requests').select('*').eq('id', requestId).single();
-      return error ? null : data;
-    } else {
-      return getLocalCollection<SyncRequest>('sync_requests').find(r => r.id === requestId) || null;
-    }
-  },
-
-  async updateSyncRequestStatus(requestId: string, status: 'approved' | 'rejected'): Promise<void> {
-    if (this.isConfigured()) {
-      await supabase!.from('sync_requests').update({ status }).eq('id', requestId);
-    } else {
-      const requests = getLocalCollection<SyncRequest>('sync_requests');
-      const idx = requests.findIndex(r => r.id === requestId);
-      if (idx > -1) {
-        requests[idx].status = status;
-        saveLocalCollection('sync_requests', requests);
-      }
-    }
-  },
-
   // --- PROFILE OPERATIONS ---
   async getProfile(userId: string): Promise<User | null> {
     if (this.isConfigured()) {
@@ -253,6 +217,29 @@ export const ClinicalAPI = {
       if (idx > -1) {
         users[idx] = { ...users[idx], ...updates };
         saveLocalCollection('registered_users', users);
+      }
+    }
+  },
+
+  // --- SYNC REQUEST OPERATIONS ---
+  async getSyncRequests(): Promise<SyncRequest[]> {
+    if (this.isConfigured()) {
+      const { data, error } = await supabase!.from('sync_requests').select('*');
+      return error ? [] : data as SyncRequest[];
+    } else {
+      return getLocalCollection<SyncRequest>('sync_requests');
+    }
+  },
+
+  async updateSyncRequestStatus(requestId: string, status: 'approved' | 'rejected'): Promise<void> {
+    if (this.isConfigured()) {
+      await supabase!.from('sync_requests').update({ status }).eq('id', requestId);
+    } else {
+      const requests = getLocalCollection<SyncRequest>('sync_requests');
+      const idx = requests.findIndex(r => r.id === requestId);
+      if (idx > -1) {
+        requests[idx].status = status;
+        saveLocalCollection('sync_requests', requests);
       }
     }
   }

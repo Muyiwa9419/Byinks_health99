@@ -68,7 +68,6 @@ export interface SyncRequest {
   id: string;
   requesterEmail: string;
   deviceInfo: string;
-  token: string;
   status: 'pending' | 'approved' | 'rejected';
   timestamp: string;
 }

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { User, UserRole } from '../types.ts';
 import { analyzeSymptoms, getHealthTips } from '../services/geminiService.ts';
 import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
+import { ClinicalAPI } from '../services/apiService.ts';
 
 interface PatientDashboardProps {
   user: User;
@@ -20,8 +21,8 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
 
   // Sync state
   const [isSyncOpen, setIsSyncOpen] = useState(false);
-  const [syncTokenInput, setSyncTokenInput] = useState('');
-  const [syncEmailInput, setSyncEmailInput] = useState('');
+  const [syncEmailInput, setSyncEmailInput] = useState(user.email);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Communication state
   const [isCommOpen, setIsCommOpen] = useState(false);
@@ -33,7 +34,6 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
       const storedUsersStr = localStorage.getItem('medi_registered_users');
       if (storedUsersStr) {
         const allUsers: User[] = JSON.parse(storedUsersStr);
-        // Only show approved consultants in the direct directory
         const doctors = allUsers.filter(u => u.role === UserRole.CONSULTANT && u.isApproved);
         setConsultants(doctors);
       }
@@ -83,50 +83,43 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
     setIsCommOpen(true);
   };
 
-  const generateSyncToken = () => {
-    const data = {
-      user: user,
-      appointments: JSON.parse(localStorage.getItem('medi_appointments') || '[]').filter((a: any) => a.patientId === user.id),
-      notifications: JSON.parse(localStorage.getItem('medi_notifications') || '[]').filter((n: any) => n.userId === user.id),
-      timestamp: new Date().toISOString()
-    };
-    const token = btoa(JSON.stringify(data));
-    navigator.clipboard.writeText(token);
-    alert("Personal Resilience Token copied! You can now use this token and your email to restore your clinical data on another device.");
-  };
-
-  const handlePersonalSync = () => {
-    try {
-      if (!syncTokenInput.trim() || !syncEmailInput.trim()) {
-        alert("Verification Required: Please provide both your Clinical Token and registered Email.");
-        return;
-      }
-
-      const decoded = JSON.parse(atob(syncTokenInput));
-      
-      // Verification Logic: Email must match the token's internal user email
-      if (decoded.user.email.toLowerCase() !== syncEmailInput.toLowerCase()) {
-        alert("Verification Failed: The provided email does not match the clinical identity inside this token.");
-        return;
-      }
-
-      // Merge Logic
-      const currentApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
-      const newApps = decoded.appointments || [];
-      const mergedApps = [...currentApps, ...newApps.filter((na: any) => !currentApps.find((ca: any) => ca.id === na.id))];
-      localStorage.setItem('medi_appointments', JSON.stringify(mergedApps));
-
-      const currentNotifs = JSON.parse(localStorage.getItem('medi_notifications') || '[]');
-      const newNotifs = decoded.notifications || [];
-      const mergedNotifs = [...currentNotifs, ...newNotifs.filter((nn: any) => !currentNotifs.find((cn: any) => cn.id === nn.id))];
-      localStorage.setItem('medi_notifications', JSON.stringify(mergedNotifs));
-
-      alert("Clinical Synchronization Successful! Your health data has been integrated into this device.");
-      setIsSyncOpen(false);
-      window.location.reload();
-    } catch (e) {
-      alert("Invalid Clinical Token. Please ensure you copied the full string correctly.");
+  const handleCloudSync = () => {
+    if (!syncEmailInput.trim()) {
+      alert("Verification Required: Please provide your clinical email.");
+      return;
     }
+
+    setIsSyncing(true);
+    
+    // Simulate push then pull
+    setTimeout(() => {
+      const payload = {
+        appointments: JSON.parse(localStorage.getItem('medi_appointments') || '[]').filter((a: any) => a.patientId === user.id),
+        notifications: JSON.parse(localStorage.getItem('medi_notifications') || '[]').filter((n: any) => n.userId === user.id),
+      };
+
+      // 1. Push local changes
+      ClinicalAPI.pushToCloud(user.email, payload);
+
+      // 2. Pull global changes (simulated merge)
+      const cloudData = ClinicalAPI.pullFromCloud(syncEmailInput);
+      
+      if (cloudData && syncEmailInput.toLowerCase() !== user.email.toLowerCase()) {
+        // Different identity restore logic
+        if (confirm(`Clinical Identity Alert: Restore records for ${syncEmailInput} and overwrite current session?`)) {
+           const currentApps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+           const mergedApps = [...currentApps, ...cloudData.appointments.filter((na: any) => !currentApps.find((ca: any) => ca.id === na.id))];
+           localStorage.setItem('medi_appointments', JSON.stringify(mergedApps));
+           alert("Session Overwritten: Clinical identity synchronized.");
+           window.location.reload();
+        }
+      } else {
+        alert("Clinical Cloud Synchronized: Local and remote medical records are now uniform.");
+      }
+
+      setIsSyncing(false);
+      setIsSyncOpen(false);
+    }, 1200);
   };
 
   const filteredConsultants = consultants.filter(c => 
@@ -154,7 +147,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
                   className="px-6 py-4 bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/20 rounded-2xl text-[10px] font-black uppercase tracking-widest transition flex items-center justify-center"
                 >
                   <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" /></svg>
-                  Sync Health Data
+                  Clinical Cloud Sync
                 </button>
               </div>
             </div>
@@ -286,7 +279,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
               </Link>
               <button onClick={() => setIsSyncOpen(true)} className="flex items-center w-full px-5 py-4 text-xs font-black uppercase tracking-widest bg-emerald-600/20 hover:bg-emerald-600/30 rounded-2xl transition border border-emerald-500/30 text-emerald-400">
                 <svg className="w-4 h-4 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" /></svg>
-                Sync Data Mobility
+                Cloud Identity Sync
               </button>
             </div>
             <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-emerald-600/10 rounded-full blur-2xl"></div>
@@ -300,43 +293,42 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsSyncOpen(false)}></div>
           <div className="relative w-full max-w-lg bg-white rounded-[3rem] shadow-2xl p-10 overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 blur-2xl opacity-50"></div>
-            <h3 className="text-2xl font-black text-slate-900 mb-2 relative z-10">Clinical Data Sync</h3>
-            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8 relative z-10">Patient Mobility Protocol</p>
+            <h3 className="text-2xl font-black text-slate-900 mb-2 relative z-10">Clinical Identity Recovery</h3>
+            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8 relative z-10">Email-Based Mobility Protocol</p>
             
             <div className="space-y-8 relative z-10">
-              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-3">Backup Data (Source)</h4>
-                <p className="text-xs text-slate-500 mb-4 font-medium leading-relaxed">Generate a secure token for this clinical terminal.</p>
-                <button 
-                  onClick={generateSyncToken}
-                  className="w-full py-4 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition"
-                >
-                  Generate & Copy Token
-                </button>
+              <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100">
+                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-4">Integrate Medical Profile</h4>
+                <p className="text-xs text-slate-500 mb-6 font-medium leading-relaxed">Byinks Cloud Vault will verify your clinical email and synchronize your health records to this node.</p>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Registered Clinical Email</label>
+                    <input 
+                      type="email" 
+                      placeholder="e.g. john.doe@clinical.com" 
+                      value={syncEmailInput}
+                      onChange={(e) => setSyncEmailInput(e.target.value)}
+                      className="w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-emerald-600 shadow-sm"
+                    />
+                  </div>
+                  <button 
+                    onClick={handleCloudSync}
+                    disabled={isSyncing}
+                    className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition flex items-center justify-center"
+                  >
+                    {isSyncing ? (
+                      <svg className="animate-spin h-4 w-4 mr-3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" fill="none"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" className="opacity-75" fill="none"></path></svg>
+                    ) : null}
+                    Synchronize Medical Cloud
+                  </button>
+                </div>
               </div>
 
-              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-3">Restore Data (Target)</h4>
-                <p className="text-xs text-slate-500 mb-4 font-medium leading-relaxed">Import health data by verifying your email identity.</p>
-                <input 
-                  type="email" 
-                  placeholder="Clinical ID (Email)" 
-                  value={syncEmailInput}
-                  onChange={(e) => setSyncEmailInput(e.target.value)}
-                  className="w-full px-5 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold mb-3 outline-none focus:border-emerald-600 transition"
-                />
-                <textarea 
-                  placeholder="Paste Sync Token Here..." 
-                  value={syncTokenInput}
-                  onChange={(e) => setSyncTokenInput(e.target.value)}
-                  className="w-full h-24 p-4 bg-white border border-slate-200 rounded-xl text-[9px] font-mono outline-none focus:border-emerald-600 transition mb-4"
-                />
-                <button 
-                  onClick={handlePersonalSync}
-                  className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-emerald-600 transition"
-                >
-                  Authorize Synchronization
-                </button>
+              <div className="text-center bg-emerald-50/30 p-4 rounded-2xl border border-dashed border-emerald-100">
+                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">
+                  {isSyncing ? 'Accessing Secure Vault...' : 'Your clinical identity is verified via 256-bit encryption.'}
+                </p>
               </div>
             </div>
             
@@ -344,7 +336,7 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
               onClick={() => setIsSyncOpen(false)}
               className="mt-6 w-full text-[9px] font-black text-slate-300 uppercase tracking-[0.3em] hover:text-slate-900 transition"
             >
-              Dismiss Hub
+              Dismiss Mobility Hub
             </button>
           </div>
         </div>

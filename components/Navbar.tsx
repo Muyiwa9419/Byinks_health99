@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User, UserRole, AppNotification } from '../types.ts';
+import { ClinicalAPI } from '../services/apiService.ts';
 
 interface NavbarProps {
   user: User | null;
@@ -12,13 +13,12 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
-  const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   
-  const [syncToken, setSyncToken] = useState('');
   const [syncEmail, setSyncEmail] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const syncRef = useRef<HTMLDivElement>(null);
 
@@ -40,8 +40,13 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
     return () => window.removeEventListener('storage', fetchNotifs);
   }, [user]);
 
-  const handleExport = () => {
-    const data = {
+  const handleCloudBackup = () => {
+    if (!user) {
+      alert("Please sign in to authorize a cloud backup.");
+      return;
+    }
+    
+    const payload = {
       users: localStorage.getItem('medi_registered_users'),
       apps: localStorage.getItem('medi_appointments'),
       trans: localStorage.getItem('medi_transactions'),
@@ -49,24 +54,26 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
       avail: localStorage.getItem('medi_availability'),
       notifs: localStorage.getItem('medi_notifications')
     };
-    const token = btoa(JSON.stringify(data));
-    setSyncToken(token);
-    navigator.clipboard.writeText(token);
-    alert("Clinical Data Token Copied! Paste this in the Sync Hub on your target device.");
+    
+    ClinicalAPI.pushToCloud(user.email, payload);
+    alert(`Clinical snapshot for ${user.email} pushed to Byinks Cloud Vault.`);
   };
 
-  const handleImport = () => {
-    try {
-      if (!syncToken.trim()) {
-        alert("Please provide a Clinical Token for synchronization.");
-        return;
-      }
-      const raw = atob(syncToken);
-      const data = JSON.parse(raw);
+  const handleCloudRestore = () => {
+    if (!syncEmail.trim()) {
+      alert("Please provide a registered Clinical Email.");
+      return;
+    }
+
+    setIsSyncing(true);
+    
+    // Simulate network delay
+    setTimeout(() => {
+      const data = ClinicalAPI.pullFromCloud(syncEmail);
       
-      // If user is logged in, we verify the email
-      if (user && syncEmail && user.email.toLowerCase() !== syncEmail.toLowerCase()) {
-        alert("Verification Mismatch: The provided email does not match your active clinical identity.");
+      if (!data) {
+        alert("Clinical Record Not Found: No backup exists for this identity in the cloud vault.");
+        setIsSyncing(false);
         return;
       }
 
@@ -77,16 +84,15 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
       if (data.avail) localStorage.setItem('medi_availability', data.avail);
       if (data.notifs) localStorage.setItem('medi_notifications', data.notifs);
 
-      alert("Clinical Synchronization Finalized! System is refreshing to update clinical records.");
+      alert(`Synchronization Successful! Records for ${syncEmail} restored. System is refreshing to update clinical records.`);
       setIsSyncOpen(false);
+      setIsSyncing(false);
       window.location.reload(); 
-    } catch (e) {
-      alert("Synchronization Error: The provided token is invalid or corrupted.");
-    }
+    }, 1500);
   };
 
   const clearStorage = () => {
-    if (confirm("Clinical Hazard: Permanent deletion of all hospital records. Proceed?")) {
+    if (confirm("Clinical Hazard: Permanent deletion of all local hospital records. Proceed?")) {
       Object.keys(localStorage).forEach(key => {
         if (key.startsWith('medi_') || key.startsWith('chat_')) localStorage.removeItem(key);
       });
@@ -126,24 +132,20 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
               <button 
                 onClick={() => setIsSyncOpen(true)}
                 className="p-3 bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white rounded-2xl transition group relative shadow-inner"
-                title="Global Sync Mobility Hub"
+                title="Clinical Cloud Sync Hub"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" /></svg>
               </button>
 
               {user ? (
                 <div className="flex items-center space-x-4">
-                  <button onClick={() => setIsNotifOpen(!isNotifOpen)} className="p-3 bg-slate-50 text-slate-400 hover:text-emerald-600 rounded-2xl transition relative">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                    {unreadCount > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>}
-                  </button>
-                  <Link to="/dashboard" className="px-5 py-3 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-600 transition">Dashboard</Link>
+                  <Link to="/dashboard" className="px-5 py-3 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-600 transition shadow-xl shadow-slate-200">Dashboard</Link>
                   <button onClick={() => { onLogout(); navigate('/'); }} className="p-3 bg-slate-50 text-slate-400 hover:text-red-500 rounded-2xl transition">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                   </button>
                 </div>
               ) : (
-                <Link to="/login" className="bg-emerald-600 text-white px-6 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 transition">Portal Access</Link>
+                <Link to="/login" className="bg-emerald-600 text-white px-6 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-200">Portal Access</Link>
               )}
             </div>
           </div>
@@ -161,7 +163,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
           <div className="p-8 space-y-6">
             <Link to="/find-doctor" onClick={closeMobileMenu} className="block text-xs font-black uppercase tracking-widest text-slate-900">Doctors</Link>
             <Link to="/services" onClick={closeMobileMenu} className="block text-xs font-black uppercase tracking-widest text-slate-900">Services</Link>
-            <button onClick={() => { setIsSyncOpen(true); closeMobileMenu(); }} className="block text-xs font-black uppercase tracking-widest text-emerald-600">Clinical Sync Hub</button>
+            <button onClick={() => { setIsSyncOpen(true); closeMobileMenu(); }} className="block text-xs font-black uppercase tracking-widest text-emerald-600">Cloud Sync</button>
             <div className="pt-6 border-t border-slate-50">
               {user ? (
                 <Link to="/dashboard" onClick={closeMobileMenu} className="block w-full py-4 bg-slate-900 text-white text-center rounded-2xl text-[10px] font-black uppercase tracking-widest">Dashboard</Link>
@@ -178,45 +180,5 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout }) => {
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsSyncOpen(false)}></div>
           <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10 overflow-hidden" ref={syncRef}>
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 blur-2xl opacity-50"></div>
-            <h3 className="text-2xl font-black text-slate-900 mb-2 relative z-10">Administrative Sync Hub</h3>
-            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8 relative z-10">Identity & Infrastructure Mobility</p>
-            
-            <div className="space-y-8 relative z-10">
-              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Export Protocol</h4>
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed font-medium">Generate a secure token for this terminal.</p>
-                <button onClick={handleExport} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-100">Copy Sync Token</button>
-              </div>
-
-              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Import & Verify</h4>
-                <input 
-                  type="email" 
-                  value={syncEmail} 
-                  onChange={(e) => setSyncEmail(e.target.value)} 
-                  placeholder="Clinical Identity (Email)" 
-                  className="w-full px-5 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold mb-3 outline-none focus:border-emerald-600" 
-                />
-                <textarea 
-                  value={syncToken} 
-                  onChange={(e) => setSyncToken(e.target.value)} 
-                  placeholder="Paste clinical token here..." 
-                  className="w-full h-24 p-4 bg-white border border-slate-200 rounded-2xl text-[9px] font-mono outline-none focus:border-emerald-600 mb-4" 
-                />
-                <button onClick={handleImport} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-600 transition shadow-xl">Authorize & Overwrite</button>
-              </div>
-
-              {user?.role === UserRole.ADMIN && (
-                <div className="pt-4 text-center border-t border-slate-100">
-                  <button onClick={clearStorage} className="text-red-500 text-[9px] font-black uppercase tracking-widest hover:underline">Clear Local Infrastructure</button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </nav>
-  );
-};
-
-export default Navbar;
+            <h3 className="text-2xl font-black text-slate-900 mb-2 relative z-10">Clinical Cloud Integration</h3>
+            <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest mb-8
