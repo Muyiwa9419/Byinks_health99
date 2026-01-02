@@ -80,8 +80,17 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     if (!ClinicalAPI.isConfigured()) {
       setRelayStatus('unavailable');
     } else {
-      channel = ClinicalAPI.subscribeToClinicalCloud(chatId, handleIncomingMessage);
-      if (channel) setRelayStatus('active');
+      setRelayStatus('connecting');
+      channel = ClinicalAPI.subscribeToClinicalCloud(
+        chatId, 
+        handleIncomingMessage, 
+        (status) => {
+          if (status === 'SUBSCRIBED') setRelayStatus('active');
+          if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setRelayStatus('unavailable');
+          }
+        }
+      );
     }
 
     // 3. Setup Local Bridge (BroadcastChannel)
@@ -95,7 +104,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       }
     };
 
-    // 4. Setup Storage Event (Cross-Tab sync for direct localStorage edits)
+    // 4. Setup Storage Event (Cross-Tab sync)
     const handleStorageChange = () => {
       const stored = localStorage.getItem(storageKey);
       if (stored === null) {
@@ -159,7 +168,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     setMessages(updatedMessages);
     localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
     
-    // Broadcast locally to other tabs immediately
+    // Broadcast locally to other tabs
     window.dispatchEvent(new Event('storage'));
     
     // Reset Timer locally
@@ -186,7 +195,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       }
     }
     
-    // Broadcast end session to remote participants and local tabs
+    // Broadcast end session to remote participants
     await ClinicalAPI.broadcastEndSession(chatId);
     
     // Purge local storage
@@ -233,7 +242,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                     relayStatus === 'connecting' ? 'bg-amber-500 animate-bounce' : 'bg-slate-300'
                   }`}></span>
                   {relayStatus === 'active' ? 'Cross-Device Relay Active' : 
-                   relayStatus === 'connecting' ? 'Opening Bridge...' : 'Local Tab-Only Mode'}
+                   relayStatus === 'connecting' ? 'Syncing Cloud Bridge...' : 'Local Tab-Only Mode'}
                 </div>
                 {timeLeft !== null && !isExpired && (
                   <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest flex items-center ${
@@ -345,7 +354,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           </form>
           {relayStatus === 'unavailable' && (
             <p className="mt-4 text-[9px] font-bold text-slate-400 text-center uppercase tracking-widest italic">
-              Note: Messages will not appear on other devices without a configured Cloud Relay.
+              Note: Supabase Cloud Bridge is inactive. Check your .env credentials or Supabase Realtime settings.
             </p>
           )}
         </div>

@@ -16,6 +16,7 @@ export const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY)
 
 const clinicalBridge = new BroadcastChannel('medi_clinical_bridge');
 const activeChannels = new Map<string, RealtimeChannel>();
+let globalSystemChannel: RealtimeChannel | null = null;
 
 const getLocalCollection = <T>(key: string): T[] => JSON.parse(localStorage.getItem(`medi_${key}`) || '[]');
 
@@ -27,17 +28,17 @@ const saveLocalCollection = (key: string, data: any) => {
   clinicalBridge.postMessage({ type: 'COLLECTION_UPDATE', key: fullKey, data });
   window.dispatchEvent(new Event('storage'));
   
-  // 2. Cross-Device Relay
+  // 2. Cross-Device Relay (Global System)
   if (supabase) {
-    const systemChannel = supabase.channel('system_relay');
-    systemChannel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        systemChannel.send({
-          type: 'broadcast',
-          event: 'system_update',
-          payload: { type: 'COLLECTION_UPDATE', data: { key: fullKey, data }, timestamp: Date.now() },
-        });
-      }
+    if (!globalSystemChannel) {
+      globalSystemChannel = supabase.channel('system_relay').subscribe();
+    }
+    
+    // We attempt to send, Supabase handles queuing if not yet subscribed
+    globalSystemChannel.send({
+      type: 'broadcast',
+      event: 'system_update',
+      payload: { type: 'COLLECTION_UPDATE', data: { key: fullKey, data }, timestamp: Date.now() },
     });
   }
 };
@@ -53,12 +54,17 @@ export const ClinicalAPI = {
 
   subscribeToGlobalSystem(onEvent: (payload: any) => void): RealtimeChannel | null {
     if (!supabase) return null;
-    return supabase.channel('system_relay')
+    if (globalSystemChannel) return globalSystemChannel;
+
+    globalSystemChannel = supabase.channel('system_relay')
       .on('broadcast', { event: 'system_update' }, ({ payload }) => onEvent(payload))
-      .subscribe();
+      .subscribe((status) => {
+        console.debug('Global System Relay Status:', status);
+      });
+    return globalSystemChannel;
   },
 
-  subscribeToClinicalCloud(chatId: string, onMessage: (msg: any) => void): RealtimeChannel | null {
+  subscribeToClinicalCloud(chatId: string, onMessage: (msg: any) => void, onStatusChange?: (status: string) => void): RealtimeChannel | null {
     if (!supabase) return null;
     
     // Cleanup old channel if exists
@@ -75,6 +81,7 @@ export const ClinicalAPI = {
       })
       .subscribe((status) => {
         console.debug(`Supabase Channel [${chatId}] Status:`, status);
+        if (onStatusChange) onStatusChange(status);
       });
     
     activeChannels.set(chatId, channel);
@@ -85,11 +92,12 @@ export const ClinicalAPI = {
     if (supabase) {
       let channel = activeChannels.get(chatId);
       if (!channel) {
+        // Fallback: create and subscribe if not active
         channel = supabase.channel(`relay_chat_${chatId}`).subscribe();
         activeChannels.set(chatId, channel);
       }
       
-      // Ensure we only send once channel is ready
+      // Send the broadcast
       await channel.send({
         type: 'broadcast',
         event: 'new_message',
