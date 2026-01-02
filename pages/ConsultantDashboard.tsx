@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { User, UserRole, Appointment } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { User, UserRole, Appointment, ConsultantAvailability, AppNotification } from '../types';
 import { summarizePatientHistory } from '../services/geminiService';
 import CommunicationOverlay from '../components/CommunicationOverlay';
 
@@ -21,10 +21,17 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
   const [loading, setLoading] = useState(false);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [activeChatPatients, setActiveChatPatients] = useState<ChatPatient[]>([]);
+  const [availability, setAvailability] = useState<ConsultantAvailability>({ consultantId: user.id, blockedSlots: {} });
+
+  // Calendar state
+  const [viewDate, setViewDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState<string>(new Date().toISOString().split('T')[0]);
 
   // Communication state
   const [isCommOpen, setIsCommOpen] = useState(false);
   const [commMode, setCommMode] = useState<'chat' | 'video'>('chat');
+
+  const timeSlots = ['08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
 
   // Sync data from localStorage
   useEffect(() => {
@@ -33,18 +40,24 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       const storedApps = localStorage.getItem('medi_appointments');
       if (storedApps) {
         const all = JSON.parse(storedApps);
-        // Filter by current consultant's ID or Name
-        setAppointments(all.filter((a: Appointment) => a.consultantId === user.id || a.consultantName.includes(user.name)));
+        setAppointments(all.filter((a: Appointment) => a.consultantId === user.id));
       }
 
-      // 2. Discover Real Patients from Chat History and Registered Users
+      // 2. Fetch Availability
+      const storedAvail = localStorage.getItem('medi_availability');
+      if (storedAvail) {
+        const allAvail: ConsultantAvailability[] = JSON.parse(storedAvail);
+        const myAvail = allAvail.find(a => a.consultantId === user.id);
+        if (myAvail) setAvailability(myAvail);
+      }
+
+      // 3. Discover Real Patients from Chat History and Registered Users
       const registeredUsersStr = localStorage.getItem('medi_registered_users') || '[]';
       const registeredUsers: User[] = JSON.parse(registeredUsersStr);
       const patients = registeredUsers.filter(u => u.role === UserRole.PATIENT);
 
       const discoveredPatients: ChatPatient[] = [];
       
-      // Scan localStorage keys for chat history involving this consultant
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key?.startsWith('chat_') && key.includes(user.id)) {
@@ -64,7 +77,6 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
         }
       }
       
-      // Also include patients who have appointments with this doctor even if no chat yet
       appointments.forEach(app => {
         if (!discoveredPatients.find(p => p.id === app.patientId)) {
           const patientRecord = patients.find(p => p.id === app.patientId);
@@ -83,14 +95,74 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 3000); 
+    const interval = setInterval(fetchData, 5000); 
     return () => clearInterval(interval);
-  }, [user.id, user.name, appointments.length]);
+  }, [user.id, appointments.length]);
+
+  const addNotification = (userId: string, title: string, message: string, appId?: string) => {
+    const notifications: AppNotification[] = JSON.parse(localStorage.getItem('medi_notifications') || '[]');
+    const newNotif: AppNotification = {
+      id: Math.random().toString(36).substr(2, 9),
+      userId,
+      appId,
+      title,
+      message,
+      timestamp: new Date().toISOString(),
+      isRead: false,
+      type: 'system'
+    };
+    notifications.push(newNotif);
+    localStorage.setItem('medi_notifications', JSON.stringify(notifications));
+    window.dispatchEvent(new Event('storage'));
+  };
+
+  const toggleSlot = (time: string) => {
+    const dateStr = selectedDay;
+    const currentBlocked = availability.blockedSlots[dateStr] || [];
+    let newBlocked: string[];
+
+    if (currentBlocked.includes(time)) {
+      newBlocked = currentBlocked.filter(t => t !== time);
+    } else {
+      newBlocked = [...currentBlocked, time];
+    }
+
+    const newAvailability = {
+      ...availability,
+      blockedSlots: {
+        ...availability.blockedSlots,
+        [dateStr]: newBlocked
+      }
+    };
+
+    setAvailability(newAvailability);
+    const storedAvail: ConsultantAvailability[] = JSON.parse(localStorage.getItem('medi_availability') || '[]');
+    const index = storedAvail.findIndex(a => a.consultantId === user.id);
+    if (index > -1) {
+      storedAvail[index] = newAvailability;
+    } else {
+      storedAvail.push(newAvailability);
+    }
+    localStorage.setItem('medi_availability', JSON.stringify(storedAvail));
+  };
 
   const updateAppStatus = (id: string, status: Appointment['status']) => {
     const all = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
-    const updated = all.map((a: Appointment) => a.id === id ? { ...a, status } : a);
-    localStorage.setItem('medi_appointments', JSON.stringify(updated));
+    const appIndex = all.findIndex((a: Appointment) => a.id === id);
+    if (appIndex > -1) {
+      const app = all[appIndex];
+      app.status = status;
+      localStorage.setItem('medi_appointments', JSON.stringify(all));
+      
+      // Notify Patient
+      const statusLabel = status === 'confirmed' ? 'Accepted' : 'Cancelled';
+      addNotification(
+        app.patientId,
+        `Appointment ${statusLabel}`,
+        `Dr. ${user.name} has ${statusLabel.toLowerCase()} your appointment for ${app.date} at ${app.time}.`,
+        app.id
+      );
+    }
   };
 
   const handleSummarize = async (history: string) => {
@@ -112,208 +184,318 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
     setIsCommOpen(true);
   };
 
+  // Calendar Helpers
+  const daysInMonth = useMemo(() => {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const days = new Date(year, month + 1, 0).getDate();
+    const firstDay = new Date(year, month, 1).getDay();
+    return { days, firstDay };
+  }, [viewDate]);
+
+  const calendarDays = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < daysInMonth.firstDay; i++) arr.push(null);
+    for (let i = 1; i <= daysInMonth.days; i++) arr.push(i);
+    return arr;
+  }, [daysInMonth]);
+
+  const changeMonth = (offset: number) => {
+    const next = new Date(viewDate);
+    next.setMonth(next.getMonth() + offset);
+    setViewDate(next);
+  };
+
+  const getAppointmentsForDay = (day: number | null) => {
+    if (!day) return [];
+    const d = new Date(viewDate.getFullYear(), viewDate.getMonth(), day).toISOString().split('T')[0];
+    return appointments.filter(a => a.date === d && a.status === 'confirmed');
+  };
+
   const pending = appointments.filter(a => a.status === 'pending');
-  const confirmed = appointments.filter(a => a.status === 'confirmed');
+  const confirmedForSelected = appointments.filter(a => a.date === selectedDay && a.status === 'confirmed');
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500 pt-24">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-6">
         <div>
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Dr. {user.name}</h1>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Clinical Workspace</h1>
           <div className="flex items-center mt-2 space-x-3">
-            <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-[10px] font-bold uppercase tracking-widest border border-blue-100">
-              {user.specialty || 'Medical Consultant'}
+            <span className="px-4 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-100">
+              {user.specialty || 'Medical Specialist'}
             </span>
-            <span className="flex items-center text-xs font-bold text-green-600">
-              <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
-              On Duty
+            <span className="flex items-center text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50/50 px-3 py-1.5 rounded-full">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full mr-2 animate-pulse"></span>
+              Clinical Node Online
             </span>
           </div>
         </div>
         <div className="flex items-center space-x-4">
-          <div className="bg-white px-6 py-4 rounded-[1.5rem] border border-slate-200 shadow-sm flex flex-col items-center">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Queue</span>
-            <span className="text-xl font-black text-amber-600">{pending.length}</span>
+          <div className="bg-white px-8 py-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center">
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Queue</span>
+            <span className="text-2xl font-black text-amber-500">{pending.length}</span>
           </div>
-          <div className="bg-white px-6 py-4 rounded-[1.5rem] border border-slate-200 shadow-sm flex flex-col items-center">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Confirmed</span>
-            <span className="text-xl font-black text-blue-600">{confirmed.length}</span>
+          <div className="bg-white px-8 py-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center">
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Confirmed</span>
+            <span className="text-2xl font-black text-emerald-600">{appointments.filter(a => a.status === 'confirmed').length}</span>
           </div>
         </div>
       </div>
 
       <div className="grid lg:grid-cols-12 gap-8">
-        {/* Left Sidebar: Patient Roster */}
+        {/* Left Column: Calendar & Availability */}
         <div className="lg:col-span-4 space-y-8">
-          {/* Incoming Appointment Requests */}
-          <section className="bg-white rounded-[2rem] border border-slate-200 p-6 shadow-sm overflow-hidden">
-            <h2 className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em] mb-6 flex items-center">
-              <svg className="w-4 h-4 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              Clinical Intake
-            </h2>
-            <div className="space-y-4">
-              {pending.length > 0 ? pending.map((app) => (
-                <div key={app.id} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 animate-in slide-in-from-left-2">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h4 className="font-bold text-slate-900 text-sm">{app.patientName}</h4>
-                      <p className="text-[11px] text-slate-500 font-medium uppercase mt-0.5">{app.date} • {app.time}</p>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
-                    <button 
-                      onClick={() => updateAppStatus(app.id, 'confirmed')}
-                      className="flex-grow bg-indigo-600 text-white text-xs font-bold py-2.5 rounded-xl hover:bg-indigo-700 transition shadow-lg shadow-indigo-100"
+          <section className="bg-white rounded-[3rem] border border-slate-100 p-8 shadow-xl shadow-slate-200/40">
+            <div className="flex items-center justify-between mb-8">
+              <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-900">Medical Schedule</h2>
+              <div className="flex space-x-2">
+                <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-slate-50 rounded-xl transition text-slate-400">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <button onClick={() => changeMonth(1)} className="p-2 hover:bg-slate-50 rounded-xl transition text-slate-400">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="text-center mb-6">
+              <h3 className="text-lg font-black text-slate-900">
+                {viewDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+              </h3>
+            </div>
+
+            <div className="grid grid-cols-7 gap-2 mb-4">
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
+                <div key={d} className="text-[10px] font-black text-slate-300 text-center uppercase">{d}</div>
+              ))}
+              {calendarDays.map((day, idx) => {
+                const isSelected = day && new Date(viewDate.getFullYear(), viewDate.getMonth(), day).toISOString().split('T')[0] === selectedDay;
+                const hasApps = day && getAppointmentsForDay(day).length > 0;
+                
+                return (
+                  <button
+                    key={idx}
+                    disabled={!day}
+                    onClick={() => day && setSelectedDay(new Date(viewDate.getFullYear(), viewDate.getMonth(), day).toISOString().split('T')[0])}
+                    className={`h-12 rounded-2xl flex flex-col items-center justify-center text-xs font-bold transition-all relative ${
+                      !day ? 'bg-transparent' : 
+                      isSelected ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-200 scale-110 z-10' : 
+                      'bg-slate-50 text-slate-600 hover:bg-emerald-50 hover:text-emerald-600'
+                    }`}
+                  >
+                    {day}
+                    {hasApps && !isSelected && <span className="absolute bottom-1.5 w-1 h-1 bg-emerald-400 rounded-full"></span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-10 space-y-4">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Slots for {new Date(selectedDay).toLocaleDateString()}</h4>
+              <div className="grid grid-cols-2 gap-3">
+                {timeSlots.map(time => {
+                  const isBlocked = availability.blockedSlots[selectedDay]?.includes(time);
+                  const isBooked = confirmedForSelected.find(a => a.time === time);
+                  
+                  return (
+                    <button
+                      key={time}
+                      disabled={!!isBooked}
+                      onClick={() => toggleSlot(time)}
+                      className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-tight transition-all border ${
+                        isBooked ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-50' :
+                        isBlocked ? 'bg-red-50 border-red-100 text-red-500' :
+                        'bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-600 hover:text-white'
+                      }`}
                     >
-                      Accept
+                      {time}
+                      <span className="block mt-1 opacity-50">
+                        {isBooked ? 'Booked' : isBlocked ? 'Unavailable' : 'Available'}
+                      </span>
                     </button>
-                    <button 
-                      onClick={() => updateAppStatus(app.id, 'cancelled')}
-                      className="px-4 bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 py-2.5 rounded-xl transition"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  </div>
-                </div>
-              )) : (
-                <div className="py-10 text-center border-2 border-dashed border-slate-100 rounded-[1.5rem]">
-                  <p className="text-xs text-slate-400 font-medium italic">Intake queue empty</p>
-                </div>
-              )}
+                  );
+                })}
+              </div>
             </div>
           </section>
 
-          {/* Active Conversations (Real Patients) */}
-          <section className="bg-slate-900 rounded-[2rem] p-6 shadow-xl border border-white/5">
-            <h2 className="text-[11px] font-bold text-indigo-400 uppercase tracking-[0.2em] mb-6">Active Consultations</h2>
-            <div className="space-y-3">
-              {activeChatPatients.length > 0 ? activeChatPatients.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => { setSelectedPatient(p); setSummary(''); }}
-                  className={`w-full text-left p-4 rounded-2xl border transition-all duration-300 flex items-center space-x-4 ${
-                    selectedPatient?.id === p.id 
-                      ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-900/40 translate-x-2' 
-                      : 'bg-white/5 border-white/5 text-slate-200 hover:bg-white/10'
-                  }`}
-                >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold flex-shrink-0 ${
-                    selectedPatient?.id === p.id ? 'bg-white/20' : 'bg-slate-800'
-                  }`}>
-                    {p.name.charAt(0)}
-                  </div>
-                  <div className="flex-grow min-w-0">
-                    <div className="font-bold text-sm truncate">{p.name}</div>
-                    <div className={`text-[10px] font-medium truncate ${
-                      selectedPatient?.id === p.id ? 'text-indigo-100' : 'text-slate-500'
-                    }`}>
-                      {p.lastMessage}
+          {/* Pending Requests */}
+          <section className="bg-slate-900 rounded-[3rem] p-8 shadow-2xl text-white overflow-hidden relative">
+            <div className="relative z-10">
+              <h2 className="text-xs font-black uppercase tracking-[0.2em] text-emerald-400 mb-8 flex items-center">
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Pending Intake
+              </h2>
+              <div className="space-y-4">
+                {pending.length > 0 ? pending.map((app) => (
+                  <div key={app.id} className="p-6 bg-white/5 rounded-[2rem] border border-white/10 backdrop-blur-md animate-in slide-in-from-left-4">
+                    <div className="mb-4">
+                      <h4 className="font-black text-white text-base">{app.patientName}</h4>
+                      <p className="text-[10px] text-emerald-400 font-black uppercase tracking-widest mt-1">{app.date} • {app.time}</p>
+                    </div>
+                    <div className="flex space-x-3">
+                      <button 
+                        onClick={() => updateAppStatus(app.id, 'confirmed')}
+                        className="flex-grow bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest py-3.5 rounded-xl hover:bg-emerald-500 transition shadow-xl shadow-emerald-900/40"
+                      >
+                        Accept
+                      </button>
+                      <button 
+                        onClick={() => updateAppStatus(app.id, 'cancelled')}
+                        className="px-4 bg-white/5 border border-white/10 text-white/40 hover:text-red-400 hover:border-red-400/30 py-3.5 rounded-xl transition"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
                     </div>
                   </div>
-                </button>
-              )) : (
-                <div className="py-12 text-center opacity-30">
-                  <svg className="w-10 h-10 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                  <p className="text-xs font-bold uppercase tracking-widest">No Active Chats</p>
-                </div>
-              )}
+                )) : (
+                  <div className="py-12 text-center bg-white/5 rounded-[2rem] border border-dashed border-white/10">
+                    <p className="text-[10px] text-white/30 font-black uppercase tracking-widest italic">Intake stream empty</p>
+                  </div>
+                )}
+              </div>
             </div>
+            <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-emerald-600/10 rounded-full blur-3xl"></div>
           </section>
         </div>
 
-        {/* Workspace: Communication & AI Panel */}
-        <div className="lg:col-span-8">
-          {selectedPatient ? (
-            <div className="bg-white rounded-[2.5rem] border border-slate-200 p-10 shadow-sm h-full flex flex-col animate-in zoom-in-95 duration-500">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 pb-8 border-b border-slate-100 gap-6">
-                <div className="flex items-center space-x-5">
-                  <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center font-bold text-slate-400 text-2xl border border-slate-200">
-                    {selectedPatient.name.charAt(0)}
-                  </div>
-                  <div>
-                    <h2 className="text-3xl font-bold text-slate-900">{selectedPatient.name}</h2>
-                    <p className="text-slate-500 font-medium text-sm">{selectedPatient.email}</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <button 
-                    onClick={() => openComm('video')} 
-                    className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all border border-indigo-100 shadow-sm"
-                    title="Start Video Consultation"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  </button>
-                  <button 
-                    onClick={() => openComm('chat')} 
-                    className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all border border-indigo-100 shadow-sm"
-                    title="Open Secure Chat"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-                  </button>
+        {/* Right Column: Interaction Hub */}
+        <div className="lg:col-span-8 space-y-8">
+          <div className="bg-white rounded-[3.5rem] border border-slate-100 p-10 shadow-xl shadow-slate-200/40 min-h-[800px] flex flex-col">
+            
+            {/* Horizontal Patient Roster */}
+            <div className="mb-12">
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-6">Patient Stream</h3>
+              <div className="flex space-x-6 overflow-x-auto pb-4 custom-scrollbar">
+                {activeChatPatients.length > 0 ? activeChatPatients.map((p) => (
                   <button
-                    onClick={() => handleSummarize(selectedPatient.lastMessage || 'No recent symptoms reported.')}
-                    disabled={loading}
-                    className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold hover:bg-slate-800 transition shadow-xl disabled:opacity-50 flex items-center"
+                    key={p.id}
+                    onClick={() => { setSelectedPatient(p); setSummary(''); }}
+                    className={`flex-shrink-0 group p-6 rounded-[2.5rem] border transition-all duration-500 flex flex-col items-center text-center w-48 ${
+                      selectedPatient?.id === p.id 
+                        ? 'bg-emerald-600 border-emerald-500 text-white shadow-2xl shadow-emerald-200 scale-105' 
+                        : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-white hover:border-emerald-200 hover:shadow-xl'
+                    }`}
                   >
-                    {loading ? (
-                      <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    ) : null}
-                    Generate Clinical Context
+                    <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center font-black text-2xl mb-4 transition-transform group-hover:rotate-6 ${
+                      selectedPatient?.id === p.id ? 'bg-white/20' : 'bg-emerald-100 text-emerald-600'
+                    }`}>
+                      {p.name.charAt(0)}
+                    </div>
+                    <div className="font-black text-sm truncate w-full mb-1">{p.name}</div>
+                    <div className={`text-[9px] font-bold uppercase tracking-widest truncate w-full ${
+                      selectedPatient?.id === p.id ? 'text-emerald-100' : 'text-slate-400'
+                    }`}>
+                      {p.lastMessage || 'New Session'}
+                    </div>
                   </button>
-                </div>
+                )) : (
+                  <div className="w-full py-12 text-center border-2 border-dashed border-slate-100 rounded-[2.5rem]">
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">No active patient sessions discovered</p>
+                  </div>
+                )}
               </div>
+            </div>
 
-              <div className="grid md:grid-cols-2 gap-10 flex-grow mb-12">
-                <div>
-                  <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Patient Reported Events</h3>
-                  <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-100 text-slate-700 leading-relaxed text-sm min-h-[250px] shadow-inner font-medium italic">
-                    {selectedPatient.lastMessage || 'Consultation history pending...'}
+            {selectedPatient ? (
+              <div className="flex-grow flex flex-col animate-in zoom-in-95 duration-700">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 pb-10 border-b border-slate-50 gap-8">
+                  <div className="flex items-center space-x-6">
+                    <div className="w-20 h-20 bg-emerald-50 rounded-[2rem] flex items-center justify-center font-black text-emerald-600 text-3xl border border-emerald-100 shadow-inner">
+                      {selectedPatient.name.charAt(0)}
+                    </div>
+                    <div>
+                      <h2 className="text-4xl font-black text-slate-900 tracking-tight">{selectedPatient.name}</h2>
+                      <p className="text-slate-500 font-bold text-sm mt-1">{selectedPatient.email}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    <button 
+                      onClick={() => openComm('video')} 
+                      className="p-5 bg-emerald-50 text-emerald-600 rounded-[1.5rem] hover:bg-emerald-600 hover:text-white transition-all border border-emerald-100 shadow-sm"
+                      title="Start Clinical Video Call"
+                    >
+                      <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                    </button>
+                    <button 
+                      onClick={() => openComm('chat')} 
+                      className="p-5 bg-emerald-50 text-emerald-600 rounded-[1.5rem] hover:bg-emerald-600 hover:text-white transition-all border border-emerald-100 shadow-sm"
+                      title="Open Direct Encryption Chat"
+                    >
+                      <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+                    </button>
+                    <button
+                      onClick={() => handleSummarize(selectedPatient.lastMessage || 'No recent clinical input available.')}
+                      disabled={loading}
+                      className="bg-slate-900 text-white px-10 py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition-all shadow-2xl disabled:opacity-50 flex items-center"
+                    >
+                      {loading && (
+                        <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                      )}
+                      Sync AI Context
+                    </button>
                   </div>
                 </div>
 
-                <div>
-                  <h3 className="text-[11px] font-bold text-indigo-400 uppercase tracking-[0.2em] mb-4">Gemini Insight Engine</h3>
-                  {summary ? (
-                    <div className="p-8 bg-indigo-50/50 rounded-[2rem] border border-indigo-100 text-slate-800 font-medium animate-in fade-in duration-500 min-h-[250px] text-sm leading-relaxed shadow-sm">
-                       {summary}
-                    </div>
-                  ) : (
-                    <div className="min-h-[250px] flex flex-col items-center justify-center border-2 border-dashed border-slate-100 rounded-[2rem] text-slate-400 italic text-xs p-10 text-center space-y-4">
-                      <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center">
-                        <svg className="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                <div className="grid md:grid-cols-2 gap-12 flex-grow mb-12">
+                  <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Patient Dialogue History</h3>
+                    <div className="p-10 bg-slate-50 rounded-[3rem] border border-slate-100 text-slate-700 leading-relaxed text-sm min-h-[300px] shadow-inner font-medium italic relative">
+                      <div className="absolute top-6 right-8 opacity-10">
+                        <svg className="w-16 h-16" fill="currentColor" viewBox="0 0 24 24"><path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.987z"/></svg>
                       </div>
-                      <p>Use the AI Summary tool to analyze recent patient interactions and medical patterns.</p>
+                      {selectedPatient.lastMessage || 'Initial clinical encounter records...'}
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
 
-              <div className="mt-auto bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
-                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-4 flex items-center">
-                  <svg className="w-4 h-4 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                  Session Observations
-                </h3>
-                <textarea 
-                  className="w-full p-6 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none h-32 transition text-slate-700 resize-none text-sm font-medium"
-                  placeholder="Clinical notes for the current session..."
-                />
-                <div className="mt-6 flex space-x-3">
-                  <button className="flex-grow bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition shadow-xl shadow-indigo-100">Sync with Medical Record</button>
-                  <button className="px-8 bg-white border border-slate-200 text-slate-600 rounded-2xl font-bold hover:bg-slate-50 transition">Discard</button>
+                  <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.3em]">Clinical Intelligence Summary</h3>
+                    {summary ? (
+                      <div className="p-10 bg-emerald-50/50 rounded-[3rem] border border-emerald-100 text-slate-800 font-medium animate-in fade-in duration-1000 min-h-[300px] text-sm leading-relaxed shadow-sm relative">
+                         <div className="absolute top-6 right-8 opacity-20 text-emerald-600">
+                           <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                         </div>
+                         {summary}
+                      </div>
+                    ) : (
+                      <div className="min-h-[300px] flex flex-col items-center justify-center border-2 border-dashed border-slate-100 rounded-[3rem] text-slate-400 italic text-xs p-12 text-center space-y-6 bg-slate-50/30">
+                        <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm">
+                          <svg className="w-8 h-8 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        </div>
+                        <p className="max-w-[200px] leading-relaxed">Activate AI Context Engine to synthesize clinical input and history patterns.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-auto bg-slate-900 p-10 rounded-[3rem] text-white shadow-2xl overflow-hidden relative">
+                  <h3 className="text-xs font-black text-emerald-400 uppercase tracking-[0.3em] mb-6 flex items-center relative z-10">
+                    <svg className="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    Scribe Notes & Observations
+                  </h3>
+                  <textarea 
+                    className="w-full p-8 bg-white/5 border border-white/10 rounded-[2rem] focus:ring-4 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none h-40 transition text-white placeholder-slate-600 resize-none text-sm font-medium relative z-10 backdrop-blur-md"
+                    placeholder="Document clinical session findings, diagnosis recommendations, and next steps..."
+                  />
+                  <div className="mt-8 flex space-x-4 relative z-10">
+                    <button className="flex-grow bg-emerald-600 text-white py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-500 transition shadow-xl shadow-emerald-950/40">Authorize Medical Sync</button>
+                    <button className="px-10 bg-white/5 border border-white/10 text-white/60 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] hover:bg-white/10 transition">Archive Draft</button>
+                  </div>
+                  <div className="absolute -top-24 -right-24 w-64 h-64 bg-emerald-600/10 rounded-full blur-3xl"></div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-[2.5rem] border border-slate-200 p-20 shadow-sm h-full flex flex-col items-center justify-center text-center">
-              <div className="w-24 h-24 bg-indigo-50 text-indigo-400 rounded-3xl flex items-center justify-center mb-10 shadow-xl shadow-indigo-100/50 transform -rotate-12">
-                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+            ) : (
+              <div className="flex-grow flex flex-col items-center justify-center text-center p-20 animate-in fade-in duration-1000">
+                <div className="w-32 h-32 bg-emerald-50 text-emerald-600 rounded-[2.5rem] flex items-center justify-center mb-12 shadow-xl shadow-emerald-100 transform -rotate-12 hover:rotate-0 transition-transform duration-700">
+                  <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                </div>
+                <h3 className="text-4xl font-black text-slate-900 mb-6 tracking-tight">Clinical Care Command</h3>
+                <p className="text-slate-500 max-w-md leading-relaxed text-base font-medium">
+                  The clinical stream is currently quiet. Select a patient from your stream above or check the intake queue to initiate a new session.
+                </p>
               </div>
-              <h3 className="text-3xl font-black text-slate-900 mb-4">Patient Care Center</h3>
-              <p className="text-slate-500 max-w-sm leading-relaxed text-sm font-medium">
-                Select an active patient consultation from the roster to start a secure video call, chat, or analyze their reported medical symptoms.
-              </p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 

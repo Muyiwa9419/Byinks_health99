@@ -1,13 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { User, UserRole } from './types';
+import { User, UserRole, Appointment, AppNotification } from './types';
 import HospitalHome from './pages/HospitalHome';
 import Login from './pages/Login';
 import PatientDashboard from './pages/PatientDashboard';
 import PatientProfile from './pages/PatientProfile';
 import ConsultantDashboard from './pages/ConsultantDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import FindDoctor from './pages/FindDoctor';
+import Services from './pages/Services';
+import Contact from './pages/Contact';
 import Navbar from './components/Navbar';
 
 const PendingApproval: React.FC<{ onLogout: () => void }> = ({ onLogout }) => (
@@ -47,6 +50,52 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Background Reminder Service
+  useEffect(() => {
+    const checkReminders = () => {
+      const appointments: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+      const now = new Date();
+      const notifications: AppNotification[] = JSON.parse(localStorage.getItem('medi_notifications') || '[]');
+
+      let updated = false;
+
+      appointments.forEach((app) => {
+        if (app.status !== 'confirmed') return;
+
+        const appDate = new Date(`${app.date} ${app.time}`);
+        const diff = appDate.getTime() - now.getTime();
+        const oneDayInMs = 24 * 60 * 60 * 1000;
+
+        if (diff > 0 && diff <= oneDayInMs) {
+          const exists = notifications.find((n) => n.appId === app.id && n.type === 'reminder');
+          if (!exists) {
+            const newNotif: AppNotification = {
+              id: Math.random().toString(36).substr(2, 9),
+              userId: app.patientId,
+              appId: app.id,
+              title: 'Clinical Reminder',
+              message: `Your session with Dr. ${app.consultantName} is in 24 hours. Join the portal at ${app.time} tomorrow.`,
+              timestamp: new Date().toISOString(),
+              isRead: false,
+              type: 'reminder'
+            };
+            notifications.push(newNotif);
+            updated = true;
+          }
+        }
+      });
+
+      if (updated) {
+        localStorage.setItem('medi_notifications', JSON.stringify(notifications));
+        window.dispatchEvent(new Event('storage'));
+      }
+    };
+
+    const interval = setInterval(checkReminders, 60000);
+    checkReminders();
+    return () => clearInterval(interval);
+  }, []);
+
   const handleLogin = (u: User) => {
     setUser(u);
     localStorage.setItem('medi_user', JSON.stringify(u));
@@ -60,7 +109,6 @@ const App: React.FC = () => {
   const handleUpdateUser = (updatedUser: User) => {
     setUser(updatedUser);
     localStorage.setItem('medi_user', JSON.stringify(updatedUser));
-
     const storedUsers: User[] = JSON.parse(localStorage.getItem('medi_registered_users') || '[]');
     const updatedUsers = storedUsers.map(u => u.id === updatedUser.id ? updatedUser : u);
     localStorage.setItem('medi_registered_users', JSON.stringify(updatedUsers));
@@ -74,6 +122,9 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<HospitalHome />} />
             <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login onLogin={handleLogin} />} />
+            <Route path="/find-doctor" element={<FindDoctor />} />
+            <Route path="/services" element={<Services />} />
+            <Route path="/contact" element={<Contact />} />
             <Route 
               path="/dashboard" 
               element={

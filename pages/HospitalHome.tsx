@@ -45,7 +45,7 @@ const HospitalHome: React.FC = () => {
             
             <div className="flex flex-col sm:flex-row gap-6">
               <Link 
-                to="/login" 
+                to="/find-doctor" 
                 className="group relative px-12 py-6 bg-emerald-600 text-white rounded-[2.5rem] font-black uppercase tracking-widest text-xs overflow-hidden shadow-2xl shadow-emerald-200 transition-all hover:scale-105"
               >
                 <span className="relative z-10 flex items-center justify-center">
@@ -115,7 +115,7 @@ const HospitalHome: React.FC = () => {
                 </div>
                 <h4 className="text-2xl font-black text-slate-900 mb-4">{s.title}</h4>
                 <p className="text-slate-500 font-medium leading-relaxed">{s.desc}</p>
-                <Link to="/login" className="mt-8 inline-flex items-center text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:translate-x-2 transition-transform">
+                <Link to="/find-doctor" className="mt-8 inline-flex items-center text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:translate-x-2 transition-transform">
                   Learn More
                   <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
                 </Link>
@@ -125,7 +125,7 @@ const HospitalHome: React.FC = () => {
         </div>
       </section>
 
-      {/* Why Choose Us / Tech Section */}
+      {/* Why Choose Us Section */}
       <section className="py-32 overflow-hidden">
         <div className="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-20 items-center">
           <div className="relative">
@@ -147,7 +147,7 @@ const HospitalHome: React.FC = () => {
                 Leading the Digital Health <br /><span className="text-emerald-600">Revolution.</span>
               </h3>
               <p className="text-lg text-slate-500 font-medium leading-relaxed">
-                Byinks Health integrates the world-class MediSphere platform to provide patients with seamless access to their health records, AI-driven diagnostics, and instant consultant access.
+                Byinks Health integrates with the MediSphere platform to provide patients with seamless access to their health records, AI-driven diagnostics, and instant consultant access.
               </p>
             </div>
             
@@ -177,13 +177,13 @@ const HospitalHome: React.FC = () => {
         <div className="max-w-7xl mx-auto bg-slate-900 rounded-[5rem] p-16 lg:p-24 relative overflow-hidden shadow-2xl">
           <div className="relative z-10 text-center max-w-3xl mx-auto">
             <h2 className="text-5xl lg:text-7xl font-black text-white mb-10 tracking-tighter">
-              Ready to Experience <br /><span className="text-emerald-500">Better Healthcare?</span>
+              Ready for <br /><span className="text-emerald-500">Better Healthcare?</span>
             </h2>
             <p className="text-slate-400 text-lg mb-12 font-medium">
-              Join thousands of patients who trust Byinks Health for their medical needs. Secure your session with a specialist today.
+              Join thousands of patients who trust Byinks Health for their medical needs. Secure your session today.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-6">
-              <Link to="/login" className="bg-emerald-600 text-white px-12 py-6 rounded-[2.5rem] font-black uppercase tracking-widest text-xs hover:bg-emerald-500 transition shadow-xl shadow-emerald-900/40">
+              <Link to="/find-doctor" className="bg-emerald-600 text-white px-12 py-6 rounded-[2.5rem] font-black uppercase tracking-widest text-xs hover:bg-emerald-500 transition shadow-xl shadow-emerald-900/40">
                 Join the Patient Portal
               </Link>
               <Link to="/login" className="bg-white/10 text-white px-12 py-6 rounded-[2.5rem] font-black uppercase tracking-widest text-xs hover:bg-white/20 transition backdrop-blur-md border border-white/10">
@@ -191,63 +191,38 @@ const HospitalHome: React.FC = () => {
               </Link>
             </div>
           </div>
-          
-          {/* Decorative Gradients */}
-          <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-[100px]"></div>
-          <div className="absolute bottom-0 left-0 w-96 h-96 bg-blue-500/10 rounded-full blur-[100px]"></div>
         </div>
       </section>
 
       {/* Footer */}
       <footer className="py-32 border-t border-slate-100">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid md:grid-cols-4 gap-16 mb-24">
-            <div className="col-span-2">
-              <Link to="/" className="flex items-center space-x-4 mb-10">
-                <div className="bg-emerald-600 p-3 rounded-2xl shadow-xl shadow-emerald-100">
-                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                  </svg>
-                </div>
-                <span className="text-3xl font-black text-slate-900 tracking-tighter">BYINKS <span className="text-emerald-600">HEALTH</span></span>
-              </Link>
-              <p className="text-xl text-slate-500 font-medium max-w-sm leading-relaxed mb-10">
-                Setting a new standard for international healthcare through compassion, integrity, and technology.
-              </p>
-              <div className="flex space-x-6">
-                {['Twitter', 'LinkedIn', 'Instagram', 'Facebook'].map(s => (
-                  <a key={s} href="#" className="text-slate-400 hover:text-emerald-600 font-black text-[10px] uppercase tracking-widest transition">{s}</a>
-                ))}
+        <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-4 gap-16">
+          <div className="col-span-2">
+            <h5 className="text-2xl font-black text-slate-900 mb-6 flex items-center">
+              <div className="bg-emerald-600 p-2 rounded-lg mr-3">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
               </div>
-            </div>
-            
-            <div>
-              <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-10">Quick Links</h5>
-              <ul className="space-y-6 text-sm font-bold text-slate-700">
-                <li><Link to="/login" className="hover:text-emerald-600 transition">Patient Portal</Link></li>
-                <li><Link to="/login" className="hover:text-emerald-600 transition">Specialist Onboarding</Link></li>
-                <li><a href="#" className="hover:text-emerald-600 transition">Hospital Facilities</a></li>
-                <li><a href="#" className="hover:text-emerald-600 transition">News & Updates</a></li>
-              </ul>
-            </div>
-            
-            <div>
-              <h5 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-10">Contact Support</h5>
-              <ul className="space-y-6 text-sm font-bold text-slate-700">
-                <li><span className="text-slate-400 font-medium block text-[9px] uppercase mb-1">Emergency 24/7</span> +234 (0) 800-BYINKS</li>
-                <li><span className="text-slate-400 font-medium block text-[9px] uppercase mb-1">Email Inquiry</span> care@byinkshealth.com</li>
-                <li><span className="text-slate-400 font-medium block text-[9px] uppercase mb-1">Main Facility</span> Lekki Phase 1, Lagos, NG</li>
-              </ul>
-            </div>
+              BYINKS HEALTH
+            </h5>
+            <p className="text-slate-500 font-medium max-w-sm leading-relaxed">
+              Setting a new standard for international healthcare through compassion, integrity, and technology.
+            </p>
           </div>
-          
-          <div className="pt-12 border-t border-slate-50 flex flex-col md:flex-row justify-between items-center gap-6">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">© 2025 BYINKS HEALTH GROUP. ALL RIGHTS RESERVED.</p>
-            <div className="flex space-x-10 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-              <a href="#" className="hover:text-emerald-600 transition">Privacy Policy</a>
-              <a href="#" className="hover:text-emerald-600 transition">Terms of Service</a>
-              <a href="#" className="hover:text-emerald-600 transition">Cookie Settings</a>
-            </div>
+          <div>
+            <h6 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6">Explore</h6>
+            <ul className="space-y-4 text-sm font-bold text-slate-600">
+              <li><Link to="/login" className="hover:text-emerald-600 transition">Patient Portal</Link></li>
+              <li><Link to="/login" className="hover:text-emerald-600 transition">Onboard Consultant</Link></li>
+              <li><Link to="/find-doctor" className="hover:text-emerald-600 transition">Find a Doctor</Link></li>
+            </ul>
+          </div>
+          <div>
+            <h6 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6">Contact</h6>
+            <ul className="space-y-4 text-sm font-bold text-slate-600">
+              <li>Lagos, Nigeria</li>
+              <li>+234 800-BYINKS</li>
+              <li>care@byinkshealth.com</li>
+            </ul>
           </div>
         </div>
       </footer>

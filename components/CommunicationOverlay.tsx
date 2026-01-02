@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
-import { User, UserRole, Transaction } from '../types';
+import { User, UserRole, Transaction, Appointment, AppNotification } from '../types';
 
 interface Message {
   senderId: string;
@@ -9,11 +9,6 @@ interface Message {
   text: string;
   time: string;
   id: string;
-}
-
-interface ClinicalObservation {
-  category: string;
-  detail: string;
 }
 
 interface CommunicationOverlayProps {
@@ -31,13 +26,12 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   const [inputText, setInputText] = useState('');
   const [isCalling, setIsCalling] = useState(false);
   const [transcription, setTranscription] = useState('');
-  const [observations, setObservations] = useState<ClinicalObservation[]>([]);
   const [isLiveActive, setIsLiveActive] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
   
-  // Revenue / Payment state
+  // Post-Consultation Payment state
+  const [sessionCompleted, setSessionCompleted] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
   const SESSION_FEE = 45;
 
@@ -51,69 +45,55 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   const chatId = [currentUser.id, targetUser.id].sort().join('--');
 
   useEffect(() => {
-    if (!isOpen) return;
-
-    // Check payment status for this specific session
-    if (currentUser.role === UserRole.PATIENT) {
-      const paymentsStr = localStorage.getItem('medi_transactions') || '[]';
-      const payments: Transaction[] = JSON.parse(paymentsStr);
-      const paid = payments.some(t => t.userId === currentUser.id && t.description.includes(targetUser.id));
-      setIsPaid(paid);
-    } else {
-      setIsPaid(true); // Consultants don't pay
+    if (!isOpen) {
+      setSessionCompleted(false);
+      setIsPaid(false);
+      return;
     }
 
     const loadMessages = () => {
       const stored = localStorage.getItem(`chat_${chatId}`);
-      if (stored) {
-        setMessages(JSON.parse(stored));
-      }
+      if (stored) setMessages(JSON.parse(stored));
     };
 
     loadMessages();
     const interval = setInterval(loadMessages, 1000); 
-
     return () => clearInterval(interval);
-  }, [isOpen, chatId, currentUser.id, currentUser.role, targetUser.id]);
+  }, [isOpen, chatId]);
 
   useEffect(() => {
-    if (isOpen && isPaid) {
+    if (isOpen && !sessionCompleted) {
       setDuration(0);
       timerRef.current = window.setInterval(() => {
         setDuration(prev => prev + 1);
       }, 1000);
       
-      if (mode === 'video') {
-        startMedia();
-      }
+      if (mode === 'video') startMedia();
     } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
       stopMedia();
     }
-  }, [isOpen, mode, isPaid]);
+  }, [isOpen, mode, sessionCompleted]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handlePayment = () => {
-    const newTransaction: Transaction = {
+  const addNotification = (userId: string, title: string, message: string, appId?: string) => {
+    const notifications: AppNotification[] = JSON.parse(localStorage.getItem('medi_notifications') || '[]');
+    const newNotif: AppNotification = {
       id: Math.random().toString(36).substr(2, 9),
-      userId: currentUser.id,
-      amount: SESSION_FEE,
-      type: 'consultation',
+      userId,
+      appId,
+      title,
+      message,
       timestamp: new Date().toISOString(),
-      description: `Telehealth Session with ${targetUser.name} (${targetUser.id})`
+      isRead: false,
+      type: 'system'
     };
-
-    const transactions = JSON.parse(localStorage.getItem('medi_transactions') || '[]');
-    transactions.push(newTransaction);
-    localStorage.setItem('medi_transactions', JSON.stringify(transactions));
-    
-    setIsPaid(true);
+    notifications.push(newNotif);
+    localStorage.setItem('medi_notifications', JSON.stringify(notifications));
+    window.dispatchEvent(new Event('storage'));
   };
 
   const startMedia = async () => {
@@ -122,10 +102,17 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       setIsCalling(true);
+      
+      // Notify target user about incoming video call
+      addNotification(
+        targetUser.id,
+        'Incoming Video Call',
+        `${currentUser.name} is initiating a clinical video consultation.`
+      );
+
       await connectToGeminiLive(stream);
     } catch (err) {
-      console.error("Media Error:", err);
-      alert("Permission denied.");
+      alert("Media access required for video consultations.");
       onClose();
     }
   };
@@ -143,15 +130,12 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     const outputCtx = new AudioContext({ sampleRate: 24000 });
     audioContextRef.current = outputCtx;
 
-    let nextStartTime = 0;
-    const sources = new Set<AudioBufferSourceNode>();
-
     const sessionPromise = ai.live.connect({
       model: 'gemini-2.5-flash-native-audio-preview-09-2025',
       config: {
         responseModalities: [Modality.AUDIO],
         outputAudioTranscription: {},
-        systemInstruction: `Scribe Assistant. Call: ${currentUser.name} & ${targetUser.name}. Log symptoms & intent.`
+        systemInstruction: `Clinical Scribe. Logging interaction between ${currentUser.name} and Dr. ${targetUser.name}.`
       },
       callbacks: {
         onopen: () => {
@@ -179,10 +163,44 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     sessionRef.current = await sessionPromise;
   };
 
+  const endSession = () => {
+    if (currentUser.role === UserRole.PATIENT) {
+      setSessionCompleted(true);
+    } else {
+      onClose(); // Consultants just close
+    }
+  };
+
+  const handlePayment = () => {
+    const newTransaction: Transaction = {
+      id: Math.random().toString(36).substr(2, 9),
+      userId: currentUser.id,
+      amount: SESSION_FEE,
+      type: 'consultation',
+      timestamp: new Date().toISOString(),
+      description: `Completed session with ${targetUser.name}`
+    };
+
+    const transactions = JSON.parse(localStorage.getItem('medi_transactions') || '[]');
+    transactions.push(newTransaction);
+    localStorage.setItem('medi_transactions', JSON.stringify(transactions));
+    
+    // Update appointment status to completed/paid
+    const apps = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const updatedApps = apps.map((a: Appointment) => 
+      (a.patientId === currentUser.id && a.consultantId === targetUser.id && a.status === 'confirmed')
+      ? { ...a, status: 'completed', paymentStatus: 'paid' } 
+      : a
+    );
+    localStorage.setItem('medi_appointments', JSON.stringify(updatedApps));
+
+    setIsPaid(true);
+    setTimeout(onClose, 1500); // Close after success message
+  };
+
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
-
     const newMsg: Message = { 
       id: Math.random().toString(36).substr(2, 9),
       senderId: currentUser.id,
@@ -190,126 +208,150 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       text: inputText, 
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
     };
-
     const updated = [...messages, newMsg];
     setMessages(updated);
     localStorage.setItem(`chat_${chatId}`, JSON.stringify(updated));
-    setInputText('');
-  };
+    
+    // Notify target user about new message
+    addNotification(
+      targetUser.id,
+      'New Secure Message',
+      `You have a new clinical message from ${currentUser.name}.`
+    );
 
-  const formatDuration = (s: number) => {
-    const m = Math.floor(s / 60);
-    const rs = s % 60;
-    return `${m}:${rs.toString().padStart(2, '0')}`;
+    setInputText('');
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 md:p-6 animate-in fade-in duration-300">
-      <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={onClose}></div>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 md:p-10 animate-in fade-in duration-300">
+      <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={endSession}></div>
       
-      <div className="relative w-full h-full max-w-6xl bg-slate-900 md:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col md:flex-row border border-white/5">
+      <div className="relative w-full h-full max-w-6xl bg-slate-900 md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col md:flex-row border border-white/5">
         
-        {/* Main Interface */}
+        {/* Main Workspace */}
         <div className="flex-grow flex flex-col bg-slate-950 relative">
-          {!isPaid ? (
-            <div className="flex-grow flex items-center justify-center p-12 text-center bg-slate-900">
-              <div className="max-w-md animate-in zoom-in-95 duration-500">
-                <div className="w-24 h-24 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-blue-900/40">
-                  <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                </div>
-                <h3 className="text-3xl font-black text-white mb-4">Secure Consultation</h3>
-                <p className="text-slate-400 mb-8 leading-relaxed font-medium">Connect with <span className="text-blue-400 font-bold">{targetUser.name}</span> instantly. Platform fee applies for this session.</p>
-                <div className="bg-slate-800 p-6 rounded-[2rem] border border-white/5 mb-8">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Provider Fee</span>
-                    <span className="text-white font-black text-xl">${SESSION_FEE}</span>
+          {sessionCompleted ? (
+            <div className="flex-grow flex items-center justify-center p-12 bg-slate-900 animate-in zoom-in-95 duration-500">
+              <div className="max-w-md text-center">
+                {isPaid ? (
+                  <div className="animate-in fade-in slide-up duration-500">
+                    <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-emerald-900/40">
+                      <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
+                    </div>
+                    <h3 className="text-3xl font-black text-white mb-2">Payment Successful</h3>
+                    <p className="text-slate-400 font-medium">Session recorded in your clinical history.</p>
                   </div>
-                  <p className="text-[10px] text-slate-500 uppercase tracking-tight text-left">Includes AI Scribe and Secure Video/Audio line</p>
-                </div>
-                <button 
-                  onClick={handlePayment}
-                  className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black hover:bg-blue-500 transition shadow-2xl shadow-blue-900/50 flex items-center justify-center space-x-3"
-                >
-                  <span>Pay & Start Session</span>
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                </button>
-                <button onClick={onClose} className="mt-6 text-slate-500 font-bold text-sm hover:text-slate-300 transition">Cancel</button>
+                ) : (
+                  <>
+                    <div className="inline-flex items-center px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-8">
+                      Session Completed • {Math.ceil(duration / 60)} Minutes
+                    </div>
+                    <h3 className="text-4xl font-black text-white mb-6 tracking-tight">Post-Consultation Summary</h3>
+                    
+                    <div className="bg-slate-800/50 p-8 rounded-[2.5rem] border border-white/5 mb-10 text-left">
+                      <div className="flex justify-between items-center mb-6">
+                        <span className="text-slate-400 font-bold uppercase tracking-widest text-xs">Consultation Fee</span>
+                        <span className="text-3xl font-black text-white">${SESSION_FEE}.00</span>
+                      </div>
+                      <div className="space-y-4 pt-6 border-t border-white/5">
+                        <div className="flex items-center text-slate-300 text-sm font-medium italic">
+                          <svg className="w-4 h-4 mr-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          Clinical context synchronized to MediSphere.
+                        </div>
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={handlePayment}
+                      className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-xs hover:bg-emerald-500 transition shadow-2xl shadow-emerald-900/50 flex items-center justify-center space-x-3 active:scale-95"
+                    >
+                      <span>Settle Consultation Bill</span>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                    </button>
+                    <button onClick={onClose} className="mt-8 text-slate-500 font-black uppercase tracking-widest text-[10px] hover:text-white transition">Cancel & Close Portal</button>
+                  </>
+                )}
               </div>
             </div>
           ) : (
             <>
               {mode === 'video' ? (
-                <div className="flex-grow relative overflow-hidden group">
-                  <video ref={videoRef} autoPlay muted className="w-full h-full object-cover grayscale-[0.2]" />
-                  <div className="absolute inset-0 bg-gradient-to-b from-slate-950/40 via-transparent to-slate-950/80"></div>
+                <div className="flex-grow relative overflow-hidden group bg-slate-900">
+                  <video ref={videoRef} autoPlay muted className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-60"></div>
                   
-                  {/* Remote User Placeholder (Simulated) */}
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <div className="w-32 h-32 rounded-full border-4 border-blue-500/30 p-1 mb-6">
-                      <img src={`https://picsum.photos/seed/${targetUser.id}/200`} className="w-full h-full rounded-full object-cover" />
+                    <div className="w-40 h-40 rounded-[3rem] border-4 border-emerald-500/20 p-2 mb-8 bg-slate-800 flex items-center justify-center">
+                       <span className="text-5xl font-black text-emerald-600 opacity-20">{targetUser.name.charAt(0)}</span>
                     </div>
-                    <h4 className="text-2xl font-bold text-white mb-2">{targetUser.name}</h4>
-                    <span className="text-xs font-black text-blue-400 uppercase tracking-[0.3em] flex items-center">
-                      <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-ping"></span> Live Signal
-                    </span>
+                    <h4 className="text-3xl font-black text-white tracking-tight">Dr. {targetUser.name}</h4>
+                    <div className="flex items-center mt-4 space-x-2">
+                       <span className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
+                       <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Active Signal</span>
+                    </div>
                   </div>
 
-                  {/* Controls */}
-                  <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center space-x-4 bg-slate-900/80 backdrop-blur-xl p-4 rounded-[2.5rem] border border-white/10 shadow-2xl">
-                    <button onClick={() => setIsMuted(!isMuted)} className={`p-4 rounded-full transition ${isMuted ? 'bg-red-500 text-white' : 'bg-slate-800 text-white hover:bg-slate-700'}`}>
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                  <div className="absolute bottom-12 left-12">
+                     <div className="bg-black/40 backdrop-blur-xl px-6 py-3 rounded-2xl border border-white/10">
+                        <span className="text-xs font-black text-white/80 tabular-nums">LIVE • {new Date(duration * 1000).toISOString().substr(14, 5)}</span>
+                     </div>
+                  </div>
+
+                  <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center space-x-6 bg-slate-900/60 backdrop-blur-2xl p-5 rounded-[3rem] border border-white/10">
+                    <button onClick={() => setIsMuted(!isMuted)} className={`p-5 rounded-full transition ${isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                      <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
                     </button>
-                    <button onClick={onClose} className="p-6 bg-red-600 text-white rounded-full hover:bg-red-500 transition shadow-xl shadow-red-900/50">
-                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                    <button onClick={endSession} className="p-8 bg-red-600 text-white rounded-full hover:bg-red-500 transition shadow-2xl shadow-red-900/40">
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="flex-grow flex flex-col bg-slate-900">
-                  <div className="p-8 border-b border-white/5 flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center font-bold text-white shadow-lg">
+                  <div className="p-10 border-b border-white/5 flex items-center justify-between bg-slate-950/30">
+                    <div className="flex items-center space-x-5">
+                      <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center font-black text-white text-xl shadow-xl shadow-emerald-900/20">
                         {targetUser.name.charAt(0)}
                       </div>
                       <div>
-                        <h3 className="text-lg font-bold text-white leading-none mb-1">{targetUser.name}</h3>
-                        <p className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">{targetUser.role} • {formatDuration(duration)}</p>
+                        <h3 className="text-xl font-black text-white leading-none mb-1">Dr. {targetUser.name}</h3>
+                        <p className="text-[10px] text-emerald-500 font-black uppercase tracking-widest">Consulting Specialist • {new Date(duration * 1000).toISOString().substr(14, 5)}</p>
                       </div>
                     </div>
-                    <button onClick={onClose} className="text-slate-500 hover:text-white transition p-2">
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                    <button onClick={endSession} className="p-3 bg-white/5 text-slate-500 hover:text-white rounded-2xl transition">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   </div>
 
-                  <div className="flex-grow overflow-y-auto p-8 space-y-4">
+                  <div className="flex-grow overflow-y-auto p-10 space-y-6">
                     {messages.map((m) => (
                       <div key={m.id} className={`flex ${m.senderId === currentUser.id ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] p-4 rounded-3xl ${
+                        <div className={`max-w-[75%] p-6 rounded-[2rem] ${
                           m.senderId === currentUser.id 
-                            ? 'bg-blue-600 text-white rounded-br-none shadow-xl shadow-blue-900/10' 
+                            ? 'bg-emerald-600 text-white rounded-br-none shadow-xl' 
                             : 'bg-slate-800 text-slate-200 rounded-bl-none border border-white/5'
                         }`}>
-                          <p className="text-[10px] opacity-60 font-black uppercase tracking-widest mb-1">{m.senderName}</p>
-                          <p className="text-sm font-medium">{m.text}</p>
+                          <p className="text-[9px] opacity-60 font-black uppercase tracking-widest mb-2">{m.senderName}</p>
+                          <p className="text-sm font-medium leading-relaxed">{m.text}</p>
                         </div>
                       </div>
                     ))}
                     <div ref={chatEndRef} />
                   </div>
 
-                  <form onSubmit={sendMessage} className="p-8 bg-slate-900/50 border-t border-white/5">
-                    <div className="flex space-x-4">
+                  <form onSubmit={sendMessage} className="p-10 bg-slate-950/50 border-t border-white/5">
+                    <div className="flex space-x-5">
                       <input 
                         type="text" 
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
-                        placeholder="Secure clinical message..."
-                        className="flex-grow bg-slate-800 border border-white/5 rounded-2xl px-6 py-4 text-white focus:ring-2 focus:ring-blue-500 outline-none transition"
+                        placeholder="Secure clinical enquiry..."
+                        className="flex-grow bg-slate-900 border-2 border-white/5 rounded-[1.5rem] px-8 py-5 text-white focus:border-emerald-600 outline-none transition font-medium"
                       />
-                      <button type="submit" className="bg-blue-600 text-white p-4 rounded-2xl hover:bg-blue-500 transition shadow-xl">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                      <button type="submit" className="bg-emerald-600 text-white px-8 rounded-[1.5rem] hover:bg-emerald-700 transition shadow-xl">
+                        <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                       </button>
                     </div>
                   </form>
@@ -319,33 +361,32 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           )}
         </div>
 
-        {/* Clinical Sidebar */}
-        <div className="w-full md:w-80 bg-slate-900/50 border-l border-white/5 p-8 flex flex-col">
-          <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-8">Clinical Summary</h4>
+        {/* Clinical Intelligence Sidebar */}
+        <div className="w-full md:w-80 bg-slate-950 border-l border-white/5 p-10 flex flex-col">
+          <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-10">Clinical Intelligence</h4>
           
-          <div className="flex-grow space-y-6">
-            <div className="p-6 bg-blue-600/5 rounded-3xl border border-blue-500/20">
-              <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest block mb-2">AI Scribe Insight</span>
-              <p className="text-xs text-slate-400 leading-relaxed italic">"{transcription || 'Awaiting live clinical dialogue for real-time transcription...'}"</p>
+          <div className="flex-grow space-y-8">
+            <div className="p-8 bg-emerald-600/5 rounded-[2.5rem] border border-emerald-500/10">
+              <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest block mb-4">Live Scribe Active</span>
+              <p className="text-xs text-slate-500 leading-relaxed italic font-medium">"{transcription || 'Awaiting live dialogue for secure transcription...'}"</p>
             </div>
 
             <div className="space-y-4">
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Observations</p>
-              <div className="p-4 bg-slate-800/50 rounded-2xl border border-white/5 flex items-center space-x-3">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-[11px] text-slate-300 font-medium tracking-tight">Signal Integrity: High</span>
-              </div>
-              <div className="p-4 bg-slate-800/50 rounded-2xl border border-white/5 flex items-center space-x-3">
-                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                <span className="text-[11px] text-slate-300 font-medium tracking-tight">Encrypted Session: AES-256</span>
-              </div>
+               <div className="flex items-center space-x-3 p-4 bg-white/5 rounded-2xl border border-white/5">
+                 <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">End-to-End Encryption</span>
+               </div>
+               <div className="flex items-center space-x-3 p-4 bg-white/5 rounded-2xl border border-white/5">
+                 <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Data Locality: Nigeria</span>
+               </div>
             </div>
           </div>
 
-          <div className="mt-8 pt-8 border-t border-white/5">
-            <button className="w-full py-4 bg-white/5 hover:bg-white/10 text-slate-400 text-[10px] font-black uppercase tracking-widest rounded-2xl transition border border-white/5">
-              Request Clinical History
-            </button>
+          <div className="mt-10 pt-10 border-t border-white/5 text-center">
+             <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-4">Post-Session Billing</p>
+             <div className="text-2xl font-black text-white mb-2">${SESSION_FEE}</div>
+             <p className="text-[8px] text-slate-500 font-bold uppercase tracking-tight">Standard Specialist Consultation Rate</p>
           </div>
         </div>
       </div>

@@ -37,6 +37,24 @@ export interface Appointment {
   fee?: number;
 }
 
+export interface ConsultantAvailability {
+  consultantId: string;
+  blockedSlots: {
+    [date: string]: string[]; // date string (YYYY-MM-DD) -> array of time strings
+  };
+}
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  appId?: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  isRead: boolean;
+  type: 'reminder' | 'system' | 'billing';
+}
+
 export interface Transaction {
   id: string;
   userId: string;
