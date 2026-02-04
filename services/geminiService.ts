@@ -38,6 +38,23 @@ export const analyzeSymptoms = async (symptoms: string) => {
   }
 };
 
+export const analyzeMedicalReport = async (reportContext: string) => {
+  try {
+    const ai = getAIClient();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-pro-preview",
+      contents: `Report Details: "${reportContext}"`,
+      config: {
+        systemInstruction: "You are a clinical report reviewer. Extract key abnormal findings, suggest possible clinical implications for the doctor, and highlight urgent metrics.",
+        temperature: 0.3,
+      },
+    });
+    return response.text || "AI analysis of the report is unavailable.";
+  } catch (e) {
+    return "Clinical intelligence engine unable to parse this report fragment.";
+  }
+};
+
 export const summarizePatientHistory = async (messages: string) => {
   try {
     const ai = getAIClient();

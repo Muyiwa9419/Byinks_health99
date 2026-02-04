@@ -41,7 +41,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           name,
           email: email.toLowerCase(),
           role,
-          isApproved: role !== UserRole.CONSULTANT, 
+          isApproved: [UserRole.PATIENT, UserRole.ADMIN].includes(role) ? true : false, 
           ...(role === UserRole.PATIENT ? { 
             age: parseInt(age), 
             bloodType, 
@@ -57,7 +57,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         onLogin(loggedUser);
       }
     } catch (err: any) {
-      setError(err.message || "Portal unreachable. Check your connection or restore your session token.");
+      setError(err.message || "Portal unreachable. Check credentials.");
     } finally {
       setLoading(false);
     }
@@ -76,19 +76,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             </h2>
             <div className="mt-2 flex flex-col items-center">
               <p className="text-slate-500 font-medium text-sm">Byinks Health Infrastructure</p>
-              <span className={`mt-2 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${isCloud ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}>
-                {isCloud ? 'Cloud Mode Active' : 'Local Sandbox Mode'}
-              </span>
             </div>
           </div>
 
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl text-[10px] font-black text-red-700 uppercase tracking-widest leading-relaxed flex items-start space-x-3">
               <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-              <div>
-                <span>{error}</span>
-                {!isCloud && <p className="mt-1 opacity-60">Try restoring your data using the Cloud Icon in the top right.</p>}
-              </div>
+              <span>{error}</span>
             </div>
           )}
 
@@ -96,14 +90,21 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             {step === 1 ? (
               <div className="space-y-5">
                 {isRegister && (
-                  <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-2xl mb-4">
-                    <button type="button" onClick={() => setRole(UserRole.PATIENT)} className={`py-2 text-[8px] font-black rounded-xl transition uppercase tracking-widest ${role === UserRole.PATIENT ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>Patient</button>
-                    <button type="button" onClick={() => setRole(UserRole.CONSULTANT)} className={`py-2 text-[8px] font-black rounded-xl transition uppercase tracking-widest ${role === UserRole.CONSULTANT ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>Doctor</button>
-                    <button type="button" onClick={() => setRole(UserRole.ADMIN)} className={`py-2 text-[8px] font-black rounded-xl transition uppercase tracking-widest ${role === UserRole.ADMIN ? 'bg-slate-900 shadow text-white' : 'text-slate-400'}`}>Admin</button>
+                  <div className="grid grid-cols-5 gap-1 p-1 bg-slate-100 rounded-2xl mb-4">
+                    {[UserRole.PATIENT, UserRole.CONSULTANT, UserRole.PHARMACY, UserRole.DISPATCH, UserRole.ADMIN].map((r) => (
+                      <button 
+                        key={r} 
+                        type="button" 
+                        onClick={() => setRole(r)} 
+                        className={`py-2 text-[7px] font-black rounded-xl transition uppercase tracking-tighter ${role === r ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}
+                      >
+                        {r.substring(0, 5)}
+                      </button>
+                    ))}
                   </div>
                 )}
                 {isRegister && (
-                  <input required placeholder="Legal Name" value={name} onChange={e => setName(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" />
+                  <input required placeholder="Name / Business Name" value={name} onChange={e => setName(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" />
                 )}
                 <input required type="email" placeholder="Email Identifier" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" />
                 <input required type="password" placeholder="Portal Password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-medium" />
@@ -132,14 +133,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <button onClick={() => { setIsRegister(!isRegister); setStep(1); setError(''); }} className="block w-full text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:underline">
               {isRegister ? 'Return to Authenticator' : 'Provision a New Clinical Identity'}
             </button>
-            {!isRegister && !isCloud && (
-              <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-                Switched devices? Use the <span className="text-emerald-500 font-black">Cloud Hub</span> in the Navbar to restore your session.
-              </div>
-            )}
           </div>
         </div>
-        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-500"></div>
       </div>
     </div>
   );

@@ -2,6 +2,8 @@
 export enum UserRole {
   PATIENT = 'PATIENT',
   CONSULTANT = 'CONSULTANT',
+  PHARMACY = 'PHARMACY',
+  DISPATCH = 'DISPATCH',
   ADMIN = 'ADMIN'
 }
 
@@ -21,6 +23,47 @@ export interface User {
   weight?: string;
   phone?: string;
   address?: string;
+  location?: {
+    lat: number;
+    lng: number;
+  };
+}
+
+export interface MedicalReport {
+  id: string;
+  patientId: string;
+  patientName: string;
+  fileName: string;
+  uploadDate: string;
+  status: 'pending_review' | 'vetted' | 'rejected';
+  consultantNote?: string;
+  vettedBy?: string;
+}
+
+export interface Prescription {
+  id: string;
+  patientId: string;
+  patientName: string;
+  consultantId: string;
+  consultantName: string;
+  pharmacyId?: string;
+  medications: string;
+  dosage: string;
+  date: string;
+  status: 'draft' | 'sent_to_pharmacy' | 'preparing' | 'ready_for_dispatch' | 'dispatched' | 'delivered';
+}
+
+export interface DeliveryOrder {
+  id: string;
+  prescriptionId: string;
+  patientId: string;
+  pharmacyId: string;
+  dispatchId?: string;
+  status: 'pending' | 'assigned' | 'in_transit' | 'delivered';
+  patientAddress: string;
+  patientLocation?: { lat: number; lng: number };
+  currentLocation?: { lat: number; lng: number };
+  timestamp: string;
 }
 
 export interface Appointment {
@@ -52,14 +95,14 @@ export interface AppNotification {
   message: string;
   timestamp: string;
   isRead: boolean;
-  type: 'reminder' | 'system' | 'billing';
+  type: 'reminder' | 'system' | 'billing' | 'delivery';
 }
 
 export interface Transaction {
   id: string;
   userId: string;
   amount: number;
-  type: 'consultation' | 'subscription';
+  type: 'consultation' | 'subscription' | 'pharmacy';
   timestamp: string;
   description: string;
 }

@@ -8,6 +8,8 @@ import PatientDashboard from './pages/PatientDashboard.tsx';
 import PatientProfile from './pages/PatientProfile.tsx';
 import ConsultantDashboard from './pages/ConsultantDashboard.tsx';
 import AdminDashboard from './pages/AdminDashboard.tsx';
+import PharmacyDashboard from './pages/PharmacyDashboard.tsx';
+import DispatchDashboard from './pages/DispatchDashboard.tsx';
 import FindDoctor from './pages/FindDoctor.tsx';
 import Services from './pages/Services.tsx';
 import Contact from './pages/Contact.tsx';
@@ -44,7 +46,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     ClinicalAPI.seedDefaultData();
-
     const checkSession = async () => {
       try {
         if (ClinicalAPI.isConfigured()) {
@@ -63,24 +64,17 @@ const App: React.FC = () => {
         setLoading(false);
       }
     };
-
     checkSession();
-
-    // Setup Cross-Device Global Sync Listener
     const systemChannel = ClinicalAPI.subscribeToGlobalSystem((payload) => {
       if (payload.type === 'COLLECTION_UPDATE' && payload.data) {
         setIsSyncing(true);
         const { key, data } = payload.data;
-        // Diffuse incoming cloud state into local storage
         localStorage.setItem(key, JSON.stringify(data));
         window.dispatchEvent(new Event('storage'));
         setTimeout(() => setIsSyncing(false), 2000);
       }
     });
-
-    return () => {
-      systemChannel?.unsubscribe();
-    };
+    return () => { systemChannel?.unsubscribe(); };
   }, []);
 
   const handleLogin = (u: User) => setUser(u);
@@ -95,6 +89,18 @@ const App: React.FC = () => {
     );
   }
 
+  const renderDashboard = () => {
+    if (!user) return <Navigate to="/login" />;
+    switch (user.role) {
+      case UserRole.PATIENT: return <PatientDashboard user={user} />;
+      case UserRole.CONSULTANT: return <ConsultantDashboard user={user} />;
+      case UserRole.ADMIN: return <AdminDashboard user={user} />;
+      case UserRole.PHARMACY: return <PharmacyDashboard user={user} />;
+      case UserRole.DISPATCH: return <DispatchDashboard user={user} />;
+      default: return <Navigate to="/" />;
+    }
+  };
+
   return (
     <Router>
       <div className="min-h-screen flex flex-col">
@@ -108,10 +114,7 @@ const App: React.FC = () => {
             <Route path="/find-doctor" element={<FindDoctor />} />
             <Route path="/services" element={<Services />} />
             <Route path="/contact" element={<Contact />} />
-            <Route 
-              path="/dashboard" 
-              element={!user ? <Navigate to="/login" /> : user.role === UserRole.PATIENT ? <PatientDashboard user={user} /> : user.role === UserRole.CONSULTANT ? <ConsultantDashboard user={user} /> : user.role === UserRole.ADMIN ? <AdminDashboard user={user} /> : <Navigate to="/" />} 
-            />
+            <Route path="/dashboard" element={renderDashboard()} />
             <Route path="/profile" element={!user || user.role !== UserRole.PATIENT ? <Navigate to="/login" /> : <PatientProfile user={user} onUpdateUser={handleUpdateUser} />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>

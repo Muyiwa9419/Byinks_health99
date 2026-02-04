@@ -45,7 +45,6 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   };
 
   const handleIncomingMessage = (incomingMsg: any) => {
-    // Check if it's a "Session Ended" signal
     if (incomingMsg.type === 'SESSION_ENDED') {
       localStorage.removeItem(storageKey);
       setMessages([]);
@@ -57,8 +56,6 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       if (prev.find(m => m.id === incomingMsg.id)) return prev;
       const newSet = [...prev, incomingMsg].sort((a, b) => a.timestamp - b.timestamp);
       localStorage.setItem(storageKey, JSON.stringify(newSet));
-      
-      // Update local countdown on any activity
       setTimeLeft(EXPIRATION_THRESHOLD);
       setIsExpired(false);
       return newSet;
@@ -68,14 +65,15 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
-    // 1. Initial Load
-    const initialMsgs = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    // 1. Initial Load from Local Storage
+    const stored = localStorage.getItem(storageKey);
+    const initialMsgs = JSON.parse(stored || '[]');
     setMessages(initialMsgs);
     const initialRemaining = getRemainingTime(initialMsgs);
     setTimeLeft(initialRemaining);
     setIsExpired(initialRemaining <= 0);
 
-    // 2. Setup Cloud Relay (Supabase Realtime)
+    // 2. Setup Cloud Relay
     let channel: any = null;
     if (!ClinicalAPI.isConfigured()) {
       setRelayStatus('unavailable');
@@ -85,15 +83,16 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
         chatId, 
         handleIncomingMessage, 
         (status) => {
-          if (status === 'SUBSCRIBED') setRelayStatus('active');
-          if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          if (status === 'SUBSCRIBED') {
+            setRelayStatus('active');
+          } else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
             setRelayStatus('unavailable');
           }
         }
       );
     }
 
-    // 3. Setup Local Bridge (BroadcastChannel)
+    // 3. Setup Local Tab Bridge
     const bridge = ClinicalAPI.getBridge();
     const handleBridge = (e: MessageEvent) => {
       if (e.data.type === 'CHAT_MESSAGE' && e.data.chatId === chatId) {
@@ -104,7 +103,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       }
     };
 
-    // 4. Setup Storage Event (Cross-Tab sync)
+    // 4. Manual LocalStorage Sync (Fallback)
     const handleStorageChange = () => {
       const stored = localStorage.getItem(storageKey);
       if (stored === null) {
@@ -125,17 +124,16 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     return () => {
       bridge.removeEventListener('message', handleBridge);
       window.removeEventListener('storage', handleStorageChange);
-      channel?.unsubscribe();
+      if (channel) channel.unsubscribe();
     };
   }, [isOpen, chatId, storageKey]);
 
-  // Activity Monitor Timer
   useEffect(() => {
     if (!isOpen || isExpired || timeLeft === null) return;
 
     const ticker = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev === null || prev <= 0) {
+        if (prev === null || prev <= 1000) {
           setIsExpired(true);
           return 0;
         }
@@ -167,17 +165,12 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
     const updatedMessages = [...messages, newMessage];
     setMessages(updatedMessages);
     localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
-    
-    // Broadcast locally to other tabs
     window.dispatchEvent(new Event('storage'));
     
-    // Reset Timer locally
     setTimeLeft(EXPIRATION_THRESHOLD);
     setIsExpired(false);
     
-    // Broadcast to Relay (Cross-Device & Cross-Tab)
     await ClinicalAPI.broadcastMessage(chatId, newMessage);
-    
     if (!customMsg) setInputText('');
   };
 
@@ -195,19 +188,12 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       }
     }
     
-    // Broadcast end session to remote participants
     await ClinicalAPI.broadcastEndSession(chatId);
-    
-    // Purge local storage
     localStorage.removeItem(storageKey);
     setMessages([]);
     setIsExpired(false);
     setTimeLeft(null);
-    
-    // Notify local environment
     window.dispatchEvent(new Event('storage'));
-    
-    // Close overlay
     onClose();
   };
 
@@ -224,7 +210,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
       <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-md" onClick={onClose}></div>
       <div className="relative w-full max-w-6xl h-full md:h-[90vh] bg-white md:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden border border-white/20">
         
-        {/* Relay Doctor Status Header */}
+        {/* Header */}
         <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-white/50 backdrop-blur-sm sticky top-0 z-10">
           <div className="flex items-center space-x-5">
             <div className="w-14 h-14 bg-emerald-600 rounded-[1.25rem] flex items-center justify-center text-white font-black text-2xl shadow-xl shadow-emerald-100">
@@ -242,7 +228,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
                     relayStatus === 'connecting' ? 'bg-amber-500 animate-bounce' : 'bg-slate-300'
                   }`}></span>
                   {relayStatus === 'active' ? 'Cross-Device Relay Active' : 
-                   relayStatus === 'connecting' ? 'Syncing Cloud Bridge...' : 'Local Tab-Only Mode'}
+                   relayStatus === 'connecting' ? 'Connecting Cloud Bridge...' : 'Local Tab-Only Mode'}
                 </div>
                 {timeLeft !== null && !isExpired && (
                   <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest flex items-center ${
@@ -269,7 +255,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           </div>
         </div>
 
-        {/* Security Banners */}
+        {/* Banners */}
         {timeLeft !== null && timeLeft < WARNING_THRESHOLD && !isExpired && (
           <div className="bg-amber-500 text-white px-8 py-3 text-center text-[10px] font-black uppercase tracking-widest animate-in slide-in-from-top-full">
             Security Warning: Session will lock in {formatTimeLeft(timeLeft)} due to clinical inactivity.
@@ -354,7 +340,7 @@ const CommunicationOverlay: React.FC<CommunicationOverlayProps> = ({
           </form>
           {relayStatus === 'unavailable' && (
             <p className="mt-4 text-[9px] font-bold text-slate-400 text-center uppercase tracking-widest italic">
-              Note: Supabase Cloud Bridge is inactive. Check your .env credentials or Supabase Realtime settings.
+              Note: Cloud Relay inactive. Check environment variables or Supabase Realtime permissions.
             </p>
           )}
         </div>

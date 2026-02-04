@@ -1,5 +1,7 @@
 {
   "name": "MediSphere - Modern Health Ecosystem",
-  "description": "A comprehensive hospital management platform featuring AI-powered patient diagnostics, consultant scheduling, and administrative analytics dashboards.",
-  "requestFramePermissions": []
+  "description": "A comprehensive hospital management platform featuring AI-powered patient diagnostics, consultant scheduling, pharmacy integration, and real-time dispatch tracking.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
 }

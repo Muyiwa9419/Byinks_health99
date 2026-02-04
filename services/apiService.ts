@@ -1,6 +1,6 @@
 
 import { createClient, RealtimeChannel } from '@supabase/supabase-js';
-import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest } from '../types.ts';
+import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest, MedicalReport, Prescription, DeliveryOrder } from '../types.ts';
 
 /**
  * ==========================================
@@ -24,17 +24,13 @@ const saveLocalCollection = (key: string, data: any) => {
   const fullKey = key.startsWith('medi_') || key.startsWith('chat_') ? key : `medi_${key}`;
   localStorage.setItem(fullKey, JSON.stringify(data));
   
-  // 1. Same-Device Broadcast
   clinicalBridge.postMessage({ type: 'COLLECTION_UPDATE', key: fullKey, data });
   window.dispatchEvent(new Event('storage'));
   
-  // 2. Cross-Device Relay (Global System)
   if (supabase) {
     if (!globalSystemChannel) {
       globalSystemChannel = supabase.channel('system_relay').subscribe();
     }
-    
-    // We attempt to send, Supabase handles queuing if not yet subscribed
     globalSystemChannel.send({
       type: 'broadcast',
       event: 'system_update',
@@ -44,46 +40,26 @@ const saveLocalCollection = (key: string, data: any) => {
 };
 
 export const ClinicalAPI = {
-  isConfigured(): boolean {
-    return !!supabase;
-  },
-
-  getBridge() {
-    return clinicalBridge;
-  },
+  isConfigured(): boolean { return !!supabase; },
+  getBridge() { return clinicalBridge; },
 
   subscribeToGlobalSystem(onEvent: (payload: any) => void): RealtimeChannel | null {
     if (!supabase) return null;
     if (globalSystemChannel) return globalSystemChannel;
-
     globalSystemChannel = supabase.channel('system_relay')
       .on('broadcast', { event: 'system_update' }, ({ payload }) => onEvent(payload))
-      .subscribe((status) => {
-        console.debug('Global System Relay Status:', status);
-      });
+      .subscribe();
     return globalSystemChannel;
   },
 
   subscribeToClinicalCloud(chatId: string, onMessage: (msg: any) => void, onStatusChange?: (status: string) => void): RealtimeChannel | null {
     if (!supabase) return null;
-    
-    // Cleanup old channel if exists
-    if (activeChannels.has(chatId)) {
-      activeChannels.get(chatId)?.unsubscribe();
-    }
-
-    const channel = supabase.channel(`relay_chat_${chatId}`)
-      .on('broadcast', { event: 'new_message' }, ({ payload }) => {
-        onMessage(payload);
-      })
-      .on('broadcast', { event: 'session_ended' }, () => {
-        onMessage({ type: 'SESSION_ENDED' });
-      })
-      .subscribe((status) => {
-        console.debug(`Supabase Channel [${chatId}] Status:`, status);
-        if (onStatusChange) onStatusChange(status);
-      });
-    
+    const existing = activeChannels.get(chatId);
+    if (existing) { existing.unsubscribe(); activeChannels.delete(chatId); }
+    const channel = supabase.channel(`chat_relay_${chatId}`)
+      .on('broadcast', { event: 'new_message' }, ({ payload }) => onMessage(payload))
+      .on('broadcast', { event: 'session_ended' }, () => onMessage({ type: 'SESSION_ENDED' }))
+      .subscribe((status) => { if (onStatusChange) onStatusChange(status); });
     activeChannels.set(chatId, channel);
     return channel;
   },
@@ -92,41 +68,45 @@ export const ClinicalAPI = {
     if (supabase) {
       let channel = activeChannels.get(chatId);
       if (!channel) {
-        // Fallback: create and subscribe if not active
-        channel = supabase.channel(`relay_chat_${chatId}`).subscribe();
+        channel = supabase.channel(`chat_relay_${chatId}`);
+        await new Promise<void>((res) => channel!.subscribe(s => s === 'SUBSCRIBED' && res()));
         activeChannels.set(chatId, channel);
       }
-      
-      // Send the broadcast
-      await channel.send({
-        type: 'broadcast',
-        event: 'new_message',
-        payload: message,
-      });
+      await channel.send({ type: 'broadcast', event: 'new_message', payload: message });
     }
-    
-    // Local bridge relay for other tabs
     clinicalBridge.postMessage({ type: 'CHAT_MESSAGE', chatId, message });
   },
 
   async broadcastEndSession(chatId: string) {
     if (supabase) {
       const channel = activeChannels.get(chatId);
-      if (channel) {
-        await channel.send({
-          type: 'broadcast',
-          event: 'session_ended',
-          payload: { timestamp: Date.now() }
-        });
-      }
+      if (channel) await channel.send({ type: 'broadcast', event: 'session_ended', payload: { timestamp: Date.now() } });
     }
     clinicalBridge.postMessage({ type: 'CHAT_CLOSED', chatId });
   },
 
+  // Collections
   async saveAppointments(apps: Appointment[]) { saveLocalCollection('appointments', apps); },
   async saveNotifications(notifs: AppNotification[]) { saveLocalCollection('notifications', notifs); },
   async saveUsers(users: User[]) { saveLocalCollection('registered_users', users); },
-  
+  async saveReports(reports: MedicalReport[]) { saveLocalCollection('reports', reports); },
+  async savePrescriptions(p: Prescription[]) { saveLocalCollection('prescriptions', p); },
+  async saveDeliveries(d: DeliveryOrder[]) { saveLocalCollection('deliveries', d); },
+
+  async addNotification(userId: string, title: string, message: string, type: AppNotification['type'] = 'system') {
+    const notifs = getLocalCollection<AppNotification>('notifications');
+    notifs.push({
+      id: Math.random().toString(36).substr(2, 9),
+      userId,
+      title,
+      message,
+      timestamp: new Date().toISOString(),
+      isRead: false,
+      type
+    });
+    await this.saveNotifications(notifs);
+  },
+
   async getProfile(userId: string): Promise<User | null> {
     const users = getLocalCollection<User>('registered_users');
     return users.find(u => u.id === userId) || null;
@@ -135,55 +115,20 @@ export const ClinicalAPI = {
   async saveProfile(user: User): Promise<void> {
     const users = getLocalCollection<User>('registered_users');
     const idx = users.findIndex(u => u.id === user.id);
-    if (idx > -1) {
-      users[idx] = user;
-      await this.saveUsers(users);
-    }
-  },
-
-  async getSyncRequests(): Promise<SyncRequest[]> {
-    return getLocalCollection<SyncRequest>('sync_requests');
-  },
-
-  async updateSyncRequestStatus(requestId: string, status: 'approved' | 'rejected'): Promise<void> {
-    const requests = getLocalCollection<SyncRequest>('sync_requests');
-    const idx = requests.findIndex(r => r.id === requestId);
-    if (idx > -1) {
-      requests[idx] = { ...requests[idx], status };
-      saveLocalCollection('sync_requests', requests);
-    }
-  },
-
-  async adminCreateUser(user: User): Promise<User> {
-    const users = getLocalCollection<User>('registered_users');
-    if (users.find(u => u.email.toLowerCase() === user.email.toLowerCase())) throw new Error("Email registered.");
-    const newUser = { ...user, id: Math.random().toString(36).substr(2, 9) };
-    users.push(newUser);
-    await this.saveUsers(users);
-    return newUser;
-  },
-
-  async removeUser(userId: string): Promise<void> {
-    const users = getLocalCollection<User>('registered_users');
-    const filteredUsers = users.filter(u => u.id !== userId);
-    await this.saveUsers(filteredUsers);
+    if (idx > -1) { users[idx] = user; await this.saveUsers(users); }
   },
 
   getClinicalSnapshot() {
     const snapshot: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && (key.startsWith('medi_') || key.startsWith('chat_'))) {
-        snapshot[key] = localStorage.getItem(key) || '';
-      }
+      if (key && (key.startsWith('medi_') || key.startsWith('chat_'))) snapshot[key] = localStorage.getItem(key) || '';
     }
     return snapshot;
   },
 
   restoreClinicalSnapshot(snapshot: Record<string, string>) {
-    Object.entries(snapshot).forEach(([key, value]) => {
-      localStorage.setItem(key, value);
-    });
+    Object.entries(snapshot).forEach(([key, value]) => localStorage.setItem(key, value));
     clinicalBridge.postMessage({ type: 'FULL_RESTORE' });
     window.dispatchEvent(new Event('storage'));
   },
@@ -200,11 +145,13 @@ export const ClinicalAPI = {
   seedDefaultData() {
     const users = getLocalCollection<User>('registered_users');
     if (users.length === 0) {
-      const defaultDocs: User[] = [
+      const defaults: User[] = [
         { id: 'doc-1', name: 'Dr. Sarah Jenkins', email: 'sarah.j@byinkshealth.com', role: UserRole.CONSULTANT, specialty: 'Cardiology', isApproved: true },
+        { id: 'pharm-1', name: 'Global Pharma Hub', email: 'pharmacy@byinkshealth.com', role: UserRole.PHARMACY, isApproved: true },
+        { id: 'dispatch-1', name: 'Swift Delivery Pro', email: 'dispatch@byinkshealth.com', role: UserRole.DISPATCH, isApproved: true },
         { id: 'admin-1', name: 'System Admin', email: 'admin@byinkshealth.com', role: UserRole.ADMIN, isApproved: true }
       ];
-      this.saveUsers(defaultDocs);
+      this.saveUsers(defaults);
     }
   },
 
@@ -231,16 +178,29 @@ export const ClinicalAPI = {
     clinicalBridge.postMessage({ type: 'SIGN_OUT' });
   },
 
-  async getAllUsers(): Promise<User[]> {
-    return getLocalCollection<User>('registered_users');
+  async getAllUsers(): Promise<User[]> { return getLocalCollection<User>('registered_users'); },
+  async getSyncRequests(): Promise<SyncRequest[]> { return getLocalCollection<SyncRequest>('sync_requests'); },
+  async updateSyncRequestStatus(requestId: string, status: 'approved' | 'rejected'): Promise<void> {
+    const requests = getLocalCollection<SyncRequest>('sync_requests');
+    const idx = requests.findIndex(r => r.id === requestId);
+    if (idx > -1) { requests[idx] = { ...requests[idx], status }; saveLocalCollection('sync_requests', requests); }
   },
-
+  async adminCreateUser(user: User): Promise<User> {
+    const users = getLocalCollection<User>('registered_users');
+    if (users.find(u => u.email.toLowerCase() === user.email.toLowerCase())) throw new Error("Email registered.");
+    const newUser = { ...user, id: Math.random().toString(36).substr(2, 9) };
+    users.push(newUser);
+    await this.saveUsers(users);
+    return newUser;
+  },
+  async removeUser(userId: string): Promise<void> {
+    const users = getLocalCollection<User>('registered_users');
+    const filteredUsers = users.filter(u => u.id !== userId);
+    await this.saveUsers(filteredUsers);
+  },
   async updateUserStatus(userId: string, updates: Partial<User>): Promise<void> {
     const users = getLocalCollection<User>('registered_users');
     const idx = users.findIndex(u => u.id === userId);
-    if (idx > -1) {
-      users[idx] = { ...users[idx], ...updates };
-      await this.saveUsers(users);
-    }
+    if (idx > -1) { users[idx] = { ...users[idx], ...updates }; await this.saveUsers(users); }
   }
 };
