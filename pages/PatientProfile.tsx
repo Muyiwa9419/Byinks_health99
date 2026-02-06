@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, Appointment, UserRole, AppNotification } from '../types.ts';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ClinicalAPI } from '../services/apiService.ts';
 
 interface PatientProfileProps {
@@ -9,15 +9,17 @@ interface PatientProfileProps {
   onUpdateUser: (user: User) => void;
 }
 
-const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) => {
+const PatientProfile: React.FC<PatientProfileProps> = ({ user: currentUser, onUpdateUser }) => {
   const navigate = useNavigate();
+  const { id } = useParams<{ id?: string }>();
+  const [targetUser, setTargetUser] = useState<User | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [consultants, setConsultants] = useState<User[]>([]);
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [isReschedulingOpen, setIsReschedulingOpen] = useState(false);
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   
-  const [editData, setEditData] = useState<Partial<User>>({ ...user });
+  const [editData, setEditData] = useState<Partial<User>>({});
   const [newApp, setNewApp] = useState({
     consultantId: '',
     date: '',
@@ -30,11 +32,21 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
   const timeSlots = ['08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
 
   useEffect(() => {
-    const fetchPortalData = () => {
+    const fetchPortalData = async () => {
+      let profile: User | null = null;
+      if (id && id !== currentUser.id) {
+        profile = await ClinicalAPI.getProfile(id);
+      } else {
+        profile = currentUser;
+      }
+      
+      setTargetUser(profile);
+      if (profile) setEditData(profile);
+
       const storedApps = localStorage.getItem('medi_appointments');
-      if (storedApps) {
+      if (storedApps && profile) {
         const all = JSON.parse(storedApps);
-        setAppointments(all.filter((a: Appointment) => a.patientId === user.id));
+        setAppointments(all.filter((a: Appointment) => a.patientId === profile.id));
       }
 
       const storedUsers = localStorage.getItem('medi_registered_users');
@@ -47,12 +59,16 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     fetchPortalData();
     window.addEventListener('storage', fetchPortalData);
     return () => window.removeEventListener('storage', fetchPortalData);
-  }, [user.id]);
+  }, [id, currentUser]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateUser({ ...user, ...editData });
-    setIsEditProfileOpen(false);
+    if (targetUser) {
+      const updated = { ...targetUser, ...editData };
+      onUpdateUser(updated);
+      setTargetUser(updated);
+      setIsEditProfileOpen(false);
+    }
   };
 
   const addNotification = async (userId: string, title: string, message: string) => {
@@ -69,36 +85,35 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     await ClinicalAPI.saveNotifications(notifications);
   };
 
-  const handleCancelAppointment = async (id: string) => {
+  const handleCancelAppointment = async (appId: string) => {
     if (!confirm("Clinical Protocol: Are you sure you want to cancel this engagement? The specialist will be notified.")) return;
 
     const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
-    const idx = allApps.findIndex((a: Appointment) => a.id === id);
+    const idx = allApps.findIndex((a: Appointment) => a.id === appId);
     if (idx > -1) {
       const app = allApps[idx];
       app.status = 'cancelled';
       await ClinicalAPI.saveAppointments(allApps);
       
-      // Notify Consultant
       addNotification(
         app.consultantId,
         'Appointment Cancelled by Patient',
-        `${user.name} has cancelled their session scheduled for ${app.date} at ${app.time}.`
+        `${targetUser?.name} has cancelled their session scheduled for ${app.date} at ${app.time}.`
       );
     }
   };
 
-  const handleDeleteAppointment = async (id: string) => {
+  const handleDeleteAppointment = async (appId: string) => {
     if (!confirm("Clinical Record Purge: Are you sure you want to permanently remove this appointment from your history? This action cannot be undone.")) return;
 
     const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
-    const filteredApps = allApps.filter((a: Appointment) => a.id !== id);
+    const filteredApps = allApps.filter((a: Appointment) => a.id !== appId);
     await ClinicalAPI.saveAppointments(filteredApps);
   };
 
   const handleRescheduleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rescheduleApp) return;
+    if (!rescheduleApp || !targetUser) return;
 
     const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
     const idx = allApps.findIndex((a: Appointment) => a.id === rescheduleApp.id);
@@ -112,7 +127,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
       addNotification(
         rescheduleApp.consultantId,
         'Appointment Rescheduled',
-        `${user.name} moved their session from ${oldDate} at ${oldTime} to ${rescheduleApp.date} at ${rescheduleApp.time}.`
+        `${targetUser.name} moved their session from ${oldDate} at ${oldTime} to ${rescheduleApp.date} at ${rescheduleApp.time}.`
       );
 
       setIsReschedulingOpen(false);
@@ -122,15 +137,15 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
 
   const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newApp.consultantId || !newApp.date || !newApp.time) return;
+    if (!newApp.consultantId || !newApp.date || !newApp.time || !targetUser) return;
 
     const consultant = consultants.find(c => c.id === newApp.consultantId);
     if (!consultant) return;
 
     const appointment: Appointment = {
       id: Math.random().toString(36).substr(2, 9),
-      patientId: user.id,
-      patientName: user.name,
+      patientId: targetUser.id,
+      patientName: targetUser.name,
       consultantId: consultant.id,
       consultantName: consultant.name,
       date: newApp.date,
@@ -145,39 +160,44 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
     const updatedApps = [...allApps, appointment];
     await ClinicalAPI.saveAppointments(updatedApps);
     
-    // Notify Consultant
     addNotification(
       consultant.id,
       'New Appointment Request',
-      `${user.name} requested an appointment for ${newApp.date} at ${newApp.time}.`
+      `${targetUser.name} requested an appointment for ${newApp.date} at ${newApp.time}.`
     );
 
     setIsBookingOpen(false);
     setNewApp({ consultantId: '', date: '', time: '', notes: '' });
   };
 
+  if (!targetUser) return <div className="p-20 text-center font-black text-slate-300">Identity Not Found</div>;
+
+  const isOwnProfile = currentUser.id === targetUser.id;
+
   return (
     <div className="max-w-7xl mx-auto px-6 py-12 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row justify-between items-start mb-12 gap-8">
         <div className="flex items-center space-x-8">
           <div className="w-24 h-24 bg-emerald-600 rounded-[2.5rem] flex items-center justify-center text-white text-4xl font-black shadow-2xl shadow-emerald-200">
-            {user.name.charAt(0)}
+            {targetUser.name.charAt(0)}
           </div>
           <div>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tight">{user.name}</h1>
-            <p className="text-slate-500 font-bold mt-1">{user.email}</p>
+            <h1 className="text-4xl font-black text-slate-900 tracking-tight">{targetUser.name}</h1>
+            <p className="text-slate-500 font-bold mt-1">{targetUser.email}</p>
             <div className="flex space-x-3 mt-4">
                <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[9px] font-black uppercase tracking-widest border border-emerald-100">Patient Profile</span>
                <span className="px-3 py-1 bg-slate-100 text-slate-500 rounded-lg text-[9px] font-black uppercase tracking-widest border border-slate-200">Verified Identity</span>
             </div>
           </div>
         </div>
-        <button 
-          onClick={() => setIsEditProfileOpen(true)}
-          className="px-8 py-4 bg-white border-2 border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition shadow-sm"
-        >
-          Edit Records
-        </button>
+        {isOwnProfile && (
+          <button 
+            onClick={() => setIsEditProfileOpen(true)}
+            className="px-8 py-4 bg-white border-2 border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition shadow-sm"
+          >
+            Edit Records
+          </button>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-3 gap-10">
@@ -186,15 +206,17 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
             <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-8">Clinical Vitals</h2>
             <div className="space-y-6">
               {[
-                { label: 'Age', value: user.age + ' Years' },
-                { label: 'Blood Group', value: user.bloodType },
-                { label: 'Genotype', value: user.genotype },
-                { label: 'Phone', value: user.phone },
-                { label: 'Address', value: user.address }
+                { label: 'Age', value: targetUser.age + ' Years' },
+                { label: 'Blood Group', value: targetUser.bloodType },
+                { label: 'Genotype', value: targetUser.genotype },
+                { label: 'Phone', value: targetUser.phone },
+                { label: 'Address', value: targetUser.address },
+                { label: 'Emergency Name', value: targetUser.emergencyContactName, highlight: true },
+                { label: 'Emergency Phone', value: targetUser.emergencyContactPhone, highlight: true }
               ].map((item, i) => (
                 <div key={i} className="flex justify-between items-center border-b border-slate-50 pb-4 last:border-0 last:pb-0">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.label}</span>
-                  <span className="text-sm font-bold text-slate-900">{item.value || 'Not Set'}</span>
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${item.highlight ? 'text-emerald-600' : 'text-slate-400'}`}>{item.label}</span>
+                  <span className={`text-sm font-bold ${item.highlight ? 'text-emerald-700' : 'text-slate-900'}`}>{item.value || 'Not Set'}</span>
                 </div>
               ))}
             </div>
@@ -217,12 +239,14 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
           <section className="bg-white rounded-[3.5rem] border border-slate-100 p-10 shadow-xl shadow-slate-200/40">
             <div className="flex items-center justify-between mb-10">
               <h2 className="text-xl font-black text-slate-900 tracking-tight">Clinical Engagements</h2>
-              <button 
-                onClick={() => setIsBookingOpen(true)}
-                className="bg-emerald-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-100"
-              >
-                New Appointment
-              </button>
+              {isOwnProfile && (
+                <button 
+                  onClick={() => setIsBookingOpen(true)}
+                  className="bg-emerald-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-100"
+                >
+                  New Appointment
+                </button>
+              )}
             </div>
 
             <div className="space-y-6">
@@ -235,6 +259,13 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
                     <div>
                       <h4 className="text-lg font-black text-slate-900">Dr. {app.consultantName}</h4>
                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{app.date} • {app.time}</p>
+                      <div className="flex items-center space-x-3 mt-2">
+                        <span className="text-[9px] font-black text-slate-900 bg-slate-200/50 px-2 py-0.5 rounded-md">${app.fee || 45}</span>
+                        <span className={`text-[8px] font-black uppercase tracking-widest flex items-center ${app.paymentStatus === 'paid' ? 'text-emerald-600' : 'text-amber-500'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${app.paymentStatus === 'paid' ? 'bg-emerald-600' : 'bg-amber-500 animate-pulse'}`}></span>
+                          {app.paymentStatus || 'pending'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
@@ -247,34 +278,36 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
                       {app.status}
                     </span>
                     
-                    <div className="flex items-center gap-2">
-                      {app.status !== 'cancelled' && app.status !== 'completed' && (
-                        <>
-                          <button 
-                            onClick={() => { setRescheduleApp(app); setIsReschedulingOpen(true); }}
-                            className="px-5 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition"
-                          >
-                            Reschedule
-                          </button>
-                          <button 
-                            onClick={() => handleCancelAppointment(app.id)}
-                            className="px-5 py-2 bg-white border border-slate-200 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-red-500 hover:bg-red-50 transition"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      )}
-                      
-                      <button 
-                        onClick={() => handleDeleteAppointment(app.id)}
-                        className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-500 hover:border-red-200 transition"
-                        title="Delete from History"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
-                    </div>
+                    {isOwnProfile && (
+                      <div className="flex items-center gap-2">
+                        {app.status !== 'cancelled' && app.status !== 'completed' && (
+                          <>
+                            <button 
+                              onClick={() => { setRescheduleApp(app); setIsReschedulingOpen(true); }}
+                              className="px-5 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition"
+                            >
+                              Reschedule
+                            </button>
+                            <button 
+                              onClick={() => handleCancelAppointment(app.id)}
+                              className="px-5 py-2 bg-white border border-slate-200 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-red-500 hover:bg-red-50 transition"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        )}
+                        
+                        <button 
+                          onClick={() => handleDeleteAppointment(app.id)}
+                          className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:text-red-500 hover:border-red-200 transition"
+                          title="Delete from History"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    )}
 
-                    {app.status === 'confirmed' && (
+                    {app.status === 'confirmed' && isOwnProfile && (
                       <button 
                         onClick={() => navigate('/dashboard')}
                         className="flex-grow md:flex-none px-6 py-2 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-600 transition"
@@ -297,44 +330,88 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
         </div>
       </div>
 
+      {/* Edit Profile Modal */}
+      {isEditProfileOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsEditProfileOpen(false)}></div>
+          <div className="relative w-full max-w-2xl bg-white rounded-[3.5rem] shadow-2xl p-10 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Clinical Record Update</h3>
+            <form onSubmit={handleUpdateProfile} className="space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Age</label>
+                  <input type="number" value={editData.age || ''} onChange={(e) => setEditData({...editData, age: parseInt(e.target.value)})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Blood Group</label>
+                  <input value={editData.bloodType || ''} onChange={(e) => setEditData({...editData, bloodType: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Personal Phone</label>
+                <input value={editData.phone || ''} onChange={(e) => setEditData({...editData, phone: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
+              </div>
+              
+              <div className="p-6 bg-emerald-50 rounded-[2rem] border border-emerald-100 space-y-4">
+                <h4 className="text-[10px] font-black text-emerald-600 uppercase tracking-widest ml-1">Emergency Protocols</h4>
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Contact Name</label>
+                    <input required value={editData.emergencyContactName || ''} onChange={(e) => setEditData({...editData, emergencyContactName: e.target.value})} className="w-full px-5 py-4 bg-white border-2 border-emerald-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition shadow-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Contact Phone</label>
+                    <input required value={editData.emergencyContactPhone || ''} onChange={(e) => setEditData({...editData, emergencyContactPhone: e.target.value})} className="w-full px-5 py-4 bg-white border-2 border-emerald-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition shadow-sm" />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Residential Address</label>
+                <textarea value={editData.address || ''} onChange={(e) => setEditData({...editData, address: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none h-24 resize-none focus:border-emerald-600 transition" />
+              </div>
+              <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition shadow-xl">
+                Update Clinical Record
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Booking Modal */}
       {isBookingOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsBookingOpen(false)}></div>
           <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10">
-            <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Schedule Consultation</h3>
+            <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Clinical Engagement</h3>
             <form onSubmit={handleBookAppointment} className="space-y-6">
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Specialist</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Select Specialist</label>
                 <select 
-                  required
-                  value={newApp.consultantId}
+                  required 
+                  value={newApp.consultantId} 
                   onChange={(e) => setNewApp({...newApp, consultantId: e.target.value})}
                   className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition"
                 >
-                  <option value="">Select Practitioner...</option>
+                  <option value="">Select Consultant</option>
                   {consultants.map(c => <option key={c.id} value={c.id}>Dr. {c.name} ({c.specialty})</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Date</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Preferred Date</label>
                   <input type="date" required value={newApp.date} onChange={(e) => setNewApp({...newApp, date: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Slot</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Preferred Time</label>
                   <select required value={newApp.time} onChange={(e) => setNewApp({...newApp, time: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition">
-                    <option value="">Choose...</option>
+                    <option value="">Select Time</option>
                     {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Clinical Notes</label>
-                <textarea value={newApp.notes} onChange={(e) => setNewApp({...newApp, notes: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none h-24 resize-none focus:border-emerald-600 transition" placeholder="Primary complaint or history..." />
-              </div>
-              <button type="submit" className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition shadow-xl shadow-emerald-100">
-                Authorize Appointment Request
+              <button type="submit" className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition shadow-xl">
+                Authorize Appointment
               </button>
             </form>
           </div>
@@ -346,34 +423,23 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user, onUpdateUser }) =
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsReschedulingOpen(false)}></div>
           <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10">
-            <h3 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">Reschedule Engagement</h3>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-8">Consultant: Dr. {rescheduleApp.consultantName}</p>
+            <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Modify Engagement</h3>
             <form onSubmit={handleRescheduleSubmit} className="space-y-6">
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">New Date</label>
-                  <input 
-                    type="date" 
-                    required 
-                    value={rescheduleApp.date} 
-                    onChange={(e) => setRescheduleApp({...rescheduleApp, date: e.target.value})} 
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" 
-                  />
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">New Date</label>
+                  <input type="date" required value={rescheduleApp.date} onChange={(e) => setRescheduleApp({...rescheduleApp, date: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">New Slot</label>
-                  <select 
-                    required 
-                    value={rescheduleApp.time} 
-                    onChange={(e) => setRescheduleApp({...rescheduleApp, time: e.target.value})} 
-                    className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition"
-                  >
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">New Time</label>
+                  <select required value={rescheduleApp.time} onChange={(e) => setRescheduleApp({...rescheduleApp, time: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition">
+                    <option value="">Select Time</option>
                     {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
               </div>
-              <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition shadow-xl shadow-slate-200">
-                Sync Rescheduling Request
+              <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-600 transition shadow-xl">
+                Update Schedule
               </button>
             </form>
           </div>

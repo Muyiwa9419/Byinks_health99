@@ -146,12 +146,19 @@ export const ClinicalAPI = {
     const users = getLocalCollection<User>('registered_users');
     if (users.length === 0) {
       const defaults: User[] = [
+        { id: 'admin-1', name: 'Byinks Admin', email: 'admin@byinkshealth.com', role: UserRole.ADMIN, isApproved: true },
         { id: 'doc-1', name: 'Dr. Sarah Jenkins', email: 'sarah.j@byinkshealth.com', role: UserRole.CONSULTANT, specialty: 'Cardiology', isApproved: true },
         { id: 'pharm-1', name: 'Global Pharma Hub', email: 'pharmacy@byinkshealth.com', role: UserRole.PHARMACY, isApproved: true },
-        { id: 'dispatch-1', name: 'Swift Delivery Pro', email: 'dispatch@byinkshealth.com', role: UserRole.DISPATCH, isApproved: true },
-        { id: 'admin-1', name: 'System Admin', email: 'admin@byinkshealth.com', role: UserRole.ADMIN, isApproved: true }
+        { id: 'dispatch-1', name: 'Swift Delivery Pro', email: 'dispatch@byinkshealth.com', role: UserRole.DISPATCH, isApproved: true }
       ];
       this.saveUsers(defaults);
+
+      // Seed a few demo reports to make it feel "real"
+      const demoReports: MedicalReport[] = [
+        { id: 'rep-1', patientId: 'p-demo', patientName: 'John Demo', fileName: 'Blood_Analysis_01.pdf', uploadDate: new Date().toLocaleDateString(), status: 'pending_review' },
+        { id: 'rep-2', patientId: 'p-demo', patientName: 'John Demo', fileName: 'XRay_Chest.jpg', uploadDate: new Date().toLocaleDateString(), status: 'pending_review' }
+      ];
+      this.saveReports(demoReports);
     }
   },
 
@@ -161,6 +168,12 @@ export const ClinicalAPI = {
     const newUser = { ...profile, id: Math.random().toString(36).substr(2, 9) };
     users.push(newUser);
     await this.saveUsers(users);
+    
+    // Simple password simulation
+    const passwords = JSON.parse(localStorage.getItem('medi_vault_passwords') || '{}');
+    passwords[email.toLowerCase()] = pass;
+    localStorage.setItem('medi_vault_passwords', JSON.stringify(passwords));
+
     localStorage.setItem('medi_local_session', JSON.stringify(newUser));
     return newUser;
   },
@@ -168,7 +181,21 @@ export const ClinicalAPI = {
   async signIn(email: string, pass: string): Promise<User> {
     const users = getLocalCollection<User>('registered_users');
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!user) throw new Error("Identity not found.");
+    if (!user) throw new Error("Identity not found in clinical registry.");
+
+    // Administrative Hardcoded Check
+    if (email.toLowerCase() === 'admin@byinkshealth.com') {
+      if (pass !== 'BYINKSHEALTH-99') {
+        throw new Error("Clinical Alert: Unauthorized Administrative Protocol. Invalid Access Key.");
+      }
+    } else {
+      // Basic check for other mock users
+      const passwords = JSON.parse(localStorage.getItem('medi_vault_passwords') || '{}');
+      if (passwords[email.toLowerCase()] && passwords[email.toLowerCase()] !== pass) {
+        throw new Error("Clinical Alert: Invalid Authenticator Key.");
+      }
+    }
+
     localStorage.setItem('medi_local_session', JSON.stringify(user));
     return user;
   },

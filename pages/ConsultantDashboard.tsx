@@ -4,6 +4,7 @@ import { User, UserRole, Appointment, MedicalReport, Prescription } from '../typ
 import { summarizePatientHistory, analyzeMedicalReport } from '../services/geminiService.ts';
 import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
 import { ClinicalAPI } from '../services/apiService.ts';
+import { Link } from 'react-router-dom';
 
 interface ConsultantDashboardProps {
   user: User;
@@ -12,6 +13,7 @@ interface ConsultantDashboardProps {
 const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
   const [reports, setReports] = useState<MedicalReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<MedicalReport | null>(null);
+  const [patientData, setPatientData] = useState<User | null>(null);
   const [aiReportInsight, setAiReportInsight] = useState('');
   const [prescribingFor, setPrescribingFor] = useState<MedicalReport | null>(null);
   const [prescriptionData, setPrescriptionData] = useState({ medications: '', dosage: '' });
@@ -39,7 +41,12 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
   const handleVetReport = async (report: MedicalReport) => {
     setSelectedReport(report);
     setLoadingAI(true);
-    const insight = await analyzeMedicalReport(`Patient: ${report.patientName}, File: ${report.fileName}`);
+    
+    // Fetch patient clinical profile for emergency visibility
+    const profile = await ClinicalAPI.getProfile(report.patientId);
+    setPatientData(profile);
+    
+    const insight = await analyzeMedicalReport(`Patient: ${report.patientName}, File: ${report.fileName}, Emergency Contact: ${profile?.emergencyContactName || 'None'}`);
     setAiReportInsight(insight);
     setLoadingAI(false);
   };
@@ -71,15 +78,14 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       ClinicalAPI.saveReports(allReports);
     }
 
-    // Notify Pharmacy & Patient
     ClinicalAPI.addNotification(prescribingFor.patientId, "Prescription Issued", `Dr. ${user.name} has vetted your report and sent a prescription to the pharmacy.`);
     
-    // Auto-Notify all Pharmacies (broadcast system)
     const pharmacies: User[] = JSON.parse(localStorage.getItem('medi_registered_users') || '[]').filter((u: any) => u.role === UserRole.PHARMACY);
     pharmacies.forEach(p => ClinicalAPI.addNotification(p.id, "New Prescription Received", `New prescription for ${prescribingFor.patientName}`));
 
     setPrescribingFor(null);
     setSelectedReport(null);
+    setPatientData(null);
     setPrescriptionData({ medications: '', dosage: '' });
     alert("Prescription synchronized with Pharmacy Hub.");
   };
@@ -94,7 +100,6 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       </div>
 
       <div className="grid lg:grid-cols-12 gap-8">
-        {/* Left: Pending Reports for Vetting */}
         <div className="lg:col-span-5 space-y-8">
           <section className="bg-white rounded-[3rem] p-8 border border-slate-100 shadow-xl">
             <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6">Vetting Queue</h2>
@@ -113,7 +118,6 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
             </div>
           </section>
 
-          {/* Pending Appointments */}
           <section className="bg-slate-900 rounded-[3rem] p-8 text-white shadow-2xl">
              <h2 className="text-xs font-black uppercase tracking-widest text-emerald-400 mb-6">Today's Schedule</h2>
              <div className="space-y-4">
@@ -130,19 +134,34 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
           </section>
         </div>
 
-        {/* Right: Vetting & Prescription Hub */}
         <div className="lg:col-span-7">
           {selectedReport ? (
             <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-xl space-y-8 animate-in zoom-in-95">
-               <div className="flex justify-between items-center border-b border-slate-50 pb-6">
+               <div className="flex justify-between items-start border-b border-slate-50 pb-6">
                  <div>
                    <h3 className="text-2xl font-black text-slate-900">{selectedReport.patientName}</h3>
-                   <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Medical Record Analysis</p>
+                   <div className="flex items-center space-x-3 mt-2">
+                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Clinical Review Active</p>
+                    <Link to={`/profile/${selectedReport.patientId}`} className="text-[8px] font-black uppercase tracking-widest text-emerald-600 hover:underline">Full Medical History</Link>
+                   </div>
                  </div>
-                 <button onClick={() => setSelectedReport(null)} className="text-slate-300 hover:text-slate-900 transition">
+                 <button onClick={() => { setSelectedReport(null); setPatientData(null); }} className="text-slate-300 hover:text-slate-900 transition">
                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"/></svg>
                  </button>
                </div>
+
+               {patientData && (
+                 <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Emergency Protocol Contact</p>
+                      <p className="text-sm font-black text-slate-900">{patientData.emergencyContactName || 'N/A'}</p>
+                    </div>
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Emergency Protocol Phone</p>
+                      <p className="text-sm font-black text-emerald-600">{patientData.emergencyContactPhone || 'N/A'}</p>
+                    </div>
+                 </div>
+               )}
 
                <div className="p-8 bg-emerald-50 rounded-2xl border border-emerald-100">
                   <h4 className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-4">AI Clinical Insights</h4>
@@ -174,7 +193,6 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
         </div>
       </div>
 
-      {/* Prescription Modal */}
       {prescribingFor && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 animate-in fade-in">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setPrescribingFor(null)}></div>

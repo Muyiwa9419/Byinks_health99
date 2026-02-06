@@ -23,6 +23,8 @@ export interface User {
   weight?: string;
   phone?: string;
   address?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
   location?: {
     lat: number;
     lng: number;

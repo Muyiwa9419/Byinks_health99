@@ -11,7 +11,7 @@ const PharmacyDashboard: React.FC<{ user: User }> = ({ user }) => {
   useEffect(() => {
     const fetchData = () => {
       const allP: Prescription[] = JSON.parse(localStorage.getItem('medi_prescriptions') || '[]');
-      setPrescriptions(allP.filter(p => p.status === 'sent_to_pharmacy' || p.status === 'preparing' || p.status === 'ready_for_dispatch'));
+      setPrescriptions(allP.filter(p => ['sent_to_pharmacy', 'preparing', 'ready_for_dispatch'].includes(p.status)));
 
       const allUsers: User[] = JSON.parse(localStorage.getItem('medi_registered_users') || '[]');
       setDispatchers(allUsers.filter(u => u.role === UserRole.DISPATCH && u.isApproved));
@@ -29,11 +29,17 @@ const PharmacyDashboard: React.FC<{ user: User }> = ({ user }) => {
       allP[idx].status = status;
       allP[idx].pharmacyId = user.id;
       ClinicalAPI.savePrescriptions(allP);
-      ClinicalAPI.addNotification(allP[idx].patientId, "Medication Update", `Pharmacy is now ${status.replace('_', ' ')} your medications.`);
+      
+      const msg = status === 'preparing' ? "Pharmacy has started preparing your medication." :
+                  status === 'ready_for_dispatch' ? "Your medication is ready and awaiting logistics pickup." : 
+                  `Prescription status updated to ${status.replace('_', ' ')}.`;
+                  
+      ClinicalAPI.addNotification(allP[idx].patientId, "Pharmacy Update", msg);
     }
   };
 
   const assignDispatch = (prescription: Prescription, dispatcherId: string) => {
+    if (!dispatcherId) return;
     const dispatcher = dispatchers.find(d => d.id === dispatcherId);
     if (!dispatcher) return;
 
@@ -48,7 +54,7 @@ const PharmacyDashboard: React.FC<{ user: User }> = ({ user }) => {
       pharmacyId: user.id,
       dispatchId: dispatcherId,
       status: 'assigned',
-      patientAddress: "Clinical Destination Registered", // Placeholder
+      patientAddress: "Clinical Destination Sync Active",
       timestamp: new Date().toISOString()
     };
 
@@ -56,57 +62,91 @@ const PharmacyDashboard: React.FC<{ user: User }> = ({ user }) => {
     ClinicalAPI.saveDeliveries([...allD, newDelivery]);
 
     // 3. Notify Dispatcher & Patient
-    ClinicalAPI.addNotification(dispatcherId, "New Delivery Assigned", `Deliver meds to ${prescription.patientName}`);
-    ClinicalAPI.addNotification(prescription.patientId, "Out for Delivery", `Your medications have been assigned to ${dispatcher.name} and are out for delivery.`);
+    ClinicalAPI.addNotification(dispatcherId, "Pickup Required", `New medication delivery assigned for ${prescription.patientName}`);
+    ClinicalAPI.addNotification(prescription.patientId, "Dispatched for Delivery", `Your medications have been handed to ${dispatcher.name} and are on the way.`);
     
-    alert(`Medication assigned to dispatcher ${dispatcher.name}`);
+    alert(`Success: Logistics protocol initialized with ${dispatcher.name}`);
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
-      <div className="mb-12">
-        <h1 className="text-4xl font-black text-slate-900 tracking-tight">{user.name}</h1>
-        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full inline-block mt-2">Certified Clinical Pharmacy</p>
+      <div className="flex justify-between items-end mb-12">
+        <div>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tight">{user.name}</h1>
+          <div className="flex items-center space-x-3 mt-3">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 bg-emerald-50 px-4 py-1.5 rounded-full border border-emerald-100">Fulfillment Hub Active</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 bg-slate-50 px-4 py-1.5 rounded-full">Node: L-75</span>
+          </div>
+        </div>
+        <div className="flex items-center space-x-6">
+           <div className="text-right">
+             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Dispatchers</p>
+             <p className="text-lg font-black text-slate-900">{dispatchers.length} Online</p>
+           </div>
+           <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white">
+             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+           </div>
+        </div>
       </div>
 
-      <div className="grid lg:grid-cols-1 gap-8">
-        <section className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-xl">
-           <h2 className="text-xl font-bold text-slate-900 mb-8">Prescription Fulfillment Hub</h2>
-           <div className="space-y-6">
-             {prescriptions.length > 0 ? prescriptions.map(p => (
-               <div key={p.id} className="p-8 bg-slate-50 border border-slate-100 rounded-[2.5rem] flex flex-col lg:flex-row justify-between items-start lg:items-center gap-8 group hover:bg-white hover:border-emerald-500 transition-all">
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-black uppercase text-slate-400">Patient</p>
-                    <h3 className="text-2xl font-black text-slate-900">{p.patientName}</h3>
-                    <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100 text-xs text-slate-700 italic">
-                      {p.medications} - {p.dosage}
+      <section className="bg-white rounded-[3.5rem] p-12 border border-slate-100 shadow-2xl">
+         <div className="flex items-center justify-between mb-10 border-b border-slate-50 pb-8">
+           <h2 className="text-2xl font-black text-slate-900 tracking-tight">Incoming Prescriptions</h2>
+           <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">{prescriptions.length} Pending Actions</span>
+         </div>
+         <div className="space-y-6">
+           {prescriptions.length > 0 ? prescriptions.map(p => (
+             <div key={p.id} className="p-8 bg-slate-50 border border-slate-100 rounded-[2.5rem] flex flex-col lg:flex-row justify-between items-start lg:items-center gap-10 group hover:bg-white hover:border-emerald-500 hover:shadow-xl transition-all duration-300">
+                <div className="flex-grow space-y-4">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-900 shadow-sm border border-slate-100 font-black">
+                      {p.patientName.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Patient Identity</p>
+                      <h3 className="text-xl font-black text-slate-900">{p.patientName}</h3>
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap gap-4 items-center">
-                     {p.status === 'sent_to_pharmacy' && (
-                       <button onClick={() => handleUpdateStatus(p.id, 'preparing')} className="px-8 py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest">Start Preparing</button>
-                     )}
-                     {p.status === 'preparing' && (
-                       <button onClick={() => handleUpdateStatus(p.id, 'ready_for_dispatch')} className="px-8 py-4 bg-amber-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest">Mark Ready</button>
-                     )}
-                     {p.status === 'ready_for_dispatch' && (
-                       <div className="flex items-center space-x-3">
-                         <select onChange={(e) => assignDispatch(p, e.target.value)} className="px-6 py-4 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:border-emerald-600">
-                           <option value="">Assign Dispatcher</option>
-                           {dispatchers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                         </select>
-                       </div>
-                     )}
-                     <span className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-[8px] font-black uppercase">{p.status.replace('_', ' ')}</span>
+                  <div className="p-6 bg-emerald-50/50 rounded-2xl border border-emerald-100 text-sm text-slate-700 italic font-medium">
+                    <span className="block font-black text-emerald-700 uppercase text-[9px] tracking-widest mb-1">Medication Protocol:</span>
+                    {p.medications} — {p.dosage}
                   </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto shrink-0">
+                   {p.status === 'sent_to_pharmacy' && (
+                     <button onClick={() => handleUpdateStatus(p.id, 'preparing')} className="px-10 py-5 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-100">Establish Prep Node</button>
+                   )}
+                   {p.status === 'preparing' && (
+                     <button onClick={() => handleUpdateStatus(p.id, 'ready_for_dispatch')} className="px-10 py-5 bg-amber-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-600 transition shadow-xl shadow-amber-100">Authorize Dispatch</button>
+                   )}
+                   {p.status === 'ready_for_dispatch' && (
+                     <div className="flex items-center space-x-3 w-full sm:w-64">
+                       <select 
+                        onChange={(e) => assignDispatch(p, e.target.value)} 
+                        className="w-full px-8 py-5 bg-white border-2 border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest outline-none focus:border-emerald-600 shadow-sm appearance-none"
+                       >
+                         <option value="">Assign Logistics Partner</option>
+                         {dispatchers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                       </select>
+                     </div>
+                   )}
+                   <div className="px-6 py-5 bg-slate-200/50 text-slate-500 rounded-2xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center min-w-[120px]">
+                     {p.status.replace('_', ' ')}
+                   </div>
+                </div>
+             </div>
+           )) : (
+             <div className="text-center py-24 bg-slate-50/50 rounded-[4rem] border-4 border-dashed border-slate-100">
+               <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-6 text-slate-200 shadow-sm">
+                  <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                </div>
-             )) : (
-               <div className="text-center py-20 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200 text-slate-400 font-medium">No pending prescriptions in the fulfillment stream.</div>
-             )}
-           </div>
-        </section>
-      </div>
+               <h3 className="text-xl font-black text-slate-900 tracking-tight">Fulfillment Queue Clear</h3>
+               <p className="text-slate-400 font-medium text-sm mt-1 uppercase tracking-widest text-[10px]">Monitoring incoming clinical broadcasts...</p>
+             </div>
+           )}
+         </div>
+      </section>
     </div>
   );
 };

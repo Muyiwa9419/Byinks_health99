@@ -115,7 +115,7 @@ const App: React.FC = () => {
             <Route path="/services" element={<Services />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/dashboard" element={renderDashboard()} />
-            <Route path="/profile" element={!user || user.role !== UserRole.PATIENT ? <Navigate to="/login" /> : <PatientProfile user={user} onUpdateUser={handleUpdateUser} />} />
+            <Route path="/profile/:id?" element={!user ? <Navigate to="/login" /> : <PatientProfile user={user} onUpdateUser={handleUpdateUser} />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>
