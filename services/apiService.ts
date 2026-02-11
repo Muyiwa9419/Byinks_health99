@@ -149,7 +149,7 @@ export const ClinicalAPI = {
         { id: 'admin-1', name: 'Byinks Admin', email: 'admin@byinkshealth.com', role: UserRole.ADMIN, isApproved: true },
         { id: 'doc-1', name: 'Dr. Sarah Jenkins', email: 'sarah.j@byinkshealth.com', role: UserRole.CONSULTANT, specialty: 'Cardiology', isApproved: true },
         { id: 'pharm-1', name: 'Global Pharma Hub', email: 'pharmacy@byinkshealth.com', role: UserRole.PHARMACY, isApproved: true },
-        { id: 'dispatch-1', name: 'Swift Delivery Pro', email: 'dispatch@byinkshealth.com', role: UserRole.DISPATCH, isApproved: true }
+        { id: 'dispatch-1', name: 'Swift Delivery Pro', email: 'dispatch@byinkshealth.com', role: UserRole.DISPATCH, isApproved: true, isOnline: true }
       ];
       this.saveUsers(defaults);
 
@@ -165,7 +165,7 @@ export const ClinicalAPI = {
   async signUp(email: string, pass: string, profile: User): Promise<User> {
     const users = getLocalCollection<User>('registered_users');
     if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) throw new Error("Email registered.");
-    const newUser = { ...profile, id: Math.random().toString(36).substr(2, 9) };
+    const newUser = { ...profile, id: Math.random().toString(36).substr(2, 9), isOnline: true };
     users.push(newUser);
     await this.saveUsers(users);
     
@@ -215,7 +215,7 @@ export const ClinicalAPI = {
   async adminCreateUser(user: User): Promise<User> {
     const users = getLocalCollection<User>('registered_users');
     if (users.find(u => u.email.toLowerCase() === user.email.toLowerCase())) throw new Error("Email registered.");
-    const newUser = { ...user, id: Math.random().toString(36).substr(2, 9) };
+    const newUser = { ...user, id: Math.random().toString(36).substr(2, 9), isOnline: true };
     users.push(newUser);
     await this.saveUsers(users);
     return newUser;

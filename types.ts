@@ -15,6 +15,7 @@ export interface User {
   specialty?: string;
   avatar?: string;
   isApproved?: boolean;
+  isOnline?: boolean;
   // Medical & Contact Info for Patients
   age?: number;
   bloodType?: string;
@@ -59,6 +60,9 @@ export interface DeliveryOrder {
   id: string;
   prescriptionId: string;
   patientId: string;
+  patientName: string;
+  medications: string;
+  dosage: string;
   pharmacyId: string;
   dispatchId?: string;
   status: 'pending' | 'assigned' | 'in_transit' | 'delivered';
