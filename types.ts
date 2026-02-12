@@ -32,6 +32,23 @@ export interface User {
   };
 }
 
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  time: string;
+  timestamp: number;
+  isSystem?: boolean;
+}
+
+export interface ChatThread {
+  chatId: string;
+  participants: string[]; // array of user IDs
+  lastMessage?: ChatMessage;
+  updatedAt: number;
+}
+
 export interface MedicalReport {
   id: string;
   patientId: string;

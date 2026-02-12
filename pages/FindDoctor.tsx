@@ -2,11 +2,18 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, UserRole } from '../types.ts';
+import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
+import { ClinicalAPI } from '../services/apiService.ts';
 
 const FindDoctor: React.FC = () => {
   const [consultants, setConsultants] = useState<User[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSpecialty, setActiveSpecialty] = useState('All');
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  
+  const [isCommOpen, setIsCommOpen] = useState(false);
+  const [selectedConsultant, setSelectedConsultant] = useState<{name: string, role: string, id: string} | null>(null);
+
   const navigate = useNavigate();
 
   const specialties = [
@@ -21,6 +28,9 @@ const FindDoctor: React.FC = () => {
         const all: User[] = JSON.parse(stored);
         setConsultants(all.filter(u => u.role === UserRole.CONSULTANT && u.isApproved));
       }
+      
+      const session = localStorage.getItem('medi_local_session');
+      if (session) setCurrentUser(JSON.parse(session));
     };
     fetchDoctors();
   }, []);
@@ -31,6 +41,15 @@ const FindDoctor: React.FC = () => {
     const matchesSpecialty = activeSpecialty === 'All' || doc.specialty === activeSpecialty;
     return matchesSearch && matchesSpecialty;
   });
+
+  const handleConsultNow = (doc: User) => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+    setSelectedConsultant({ id: doc.id, name: doc.name, role: 'Consultant' });
+    setIsCommOpen(true);
+  };
 
   return (
     <div className="bg-white min-h-screen pb-20">
@@ -109,16 +128,16 @@ const FindDoctor: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <button 
-                  onClick={() => navigate('/login')}
+                  onClick={() => handleConsultNow(doc)}
                   className="bg-emerald-600 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-100"
                 >
-                  Book Slot
+                  Consult Now
                 </button>
                 <button 
                   onClick={() => navigate('/login')}
                   className="bg-slate-50 text-slate-600 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition"
                 >
-                  View Profile
+                  Book Slot
                 </button>
               </div>
             </div>
@@ -149,6 +168,15 @@ const FindDoctor: React.FC = () => {
           <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-600/10 rounded-full blur-3xl -mr-32 -mt-32"></div>
         </div>
       </div>
+
+      {selectedConsultant && currentUser && (
+        <CommunicationOverlay 
+          isOpen={isCommOpen}
+          onClose={() => setIsCommOpen(false)}
+          currentUser={currentUser}
+          targetUser={selectedConsultant}
+        />
+      )}
     </div>
   );
 };

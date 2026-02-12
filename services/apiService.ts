@@ -1,6 +1,6 @@
 
 import { createClient, RealtimeChannel } from '@supabase/supabase-js';
-import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest, MedicalReport, Prescription, DeliveryOrder } from '../types.ts';
+import { User, Appointment, AppNotification, Transaction, UserRole, SyncRequest, MedicalReport, Prescription, DeliveryOrder, ChatThread, ChatMessage } from '../types.ts';
 
 /**
  * ==========================================
@@ -64,7 +64,26 @@ export const ClinicalAPI = {
     return channel;
   },
 
-  async broadcastMessage(chatId: string, message: any) {
+  async broadcastMessage(chatId: string, message: ChatMessage) {
+    // Update thread registry
+    const threads = getLocalCollection<ChatThread>('chat_threads');
+    const participants = chatId.split('--');
+    const existingIdx = threads.findIndex(t => t.chatId === chatId);
+    
+    const threadData: ChatThread = {
+      chatId,
+      participants,
+      lastMessage: message,
+      updatedAt: Date.now()
+    };
+
+    if (existingIdx > -1) {
+      threads[existingIdx] = threadData;
+    } else {
+      threads.push(threadData);
+    }
+    saveLocalCollection('chat_threads', threads);
+
     if (supabase) {
       let channel = activeChannels.get(chatId);
       if (!channel) {
@@ -83,6 +102,16 @@ export const ClinicalAPI = {
       if (channel) await channel.send({ type: 'broadcast', event: 'session_ended', payload: { timestamp: Date.now() } });
     }
     clinicalBridge.postMessage({ type: 'CHAT_CLOSED', chatId });
+    
+    // Remove from registry
+    const threads = getLocalCollection<ChatThread>('chat_threads');
+    const filtered = threads.filter(t => t.chatId !== chatId);
+    saveLocalCollection('chat_threads', filtered);
+  },
+
+  async getActiveThreads(userId: string): Promise<ChatThread[]> {
+    const threads = getLocalCollection<ChatThread>('chat_threads');
+    return threads.filter(t => t.participants.includes(userId)).sort((a, b) => b.updatedAt - a.updatedAt);
   },
 
   // Collections

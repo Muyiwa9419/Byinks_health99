@@ -18,6 +18,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user: currentUser, onUp
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [isReschedulingOpen, setIsReschedulingOpen] = useState(false);
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
   
   const [editData, setEditData] = useState<Partial<User>>({});
   const [newApp, setNewApp] = useState({
@@ -69,6 +70,38 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user: currentUser, onUp
       setTargetUser(updated);
       setIsEditProfileOpen(false);
     }
+  };
+
+  const syncLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser infrastructure.");
+      return;
+    }
+
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const location = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+        
+        if (targetUser) {
+          const updated = { ...targetUser, location };
+          await ClinicalAPI.updateUserStatus(targetUser.id, { location });
+          onUpdateUser(updated);
+          setTargetUser(updated);
+          setIsLocating(false);
+          alert("Clinical coordinates synchronized. Dispatchers can now locate you for delivery.");
+        }
+      },
+      (error) => {
+        console.error("Location sync failed:", error);
+        setIsLocating(false);
+        alert("Failed to establish GPS uplink. Please ensure location permissions are granted.");
+      },
+      { enableHighAccuracy: true }
+    );
   };
 
   const addNotification = async (userId: string, title: string, message: string) => {
@@ -190,14 +223,26 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user: currentUser, onUp
             </div>
           </div>
         </div>
-        {isOwnProfile && (
-          <button 
-            onClick={() => setIsEditProfileOpen(true)}
-            className="px-8 py-4 bg-white border-2 border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition shadow-sm"
-          >
-            Edit Records
-          </button>
-        )}
+        <div className="flex gap-4">
+          {isOwnProfile && (
+            <button 
+              onClick={syncLocation}
+              disabled={isLocating}
+              className={`px-8 py-4 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition shadow-xl shadow-emerald-100 flex items-center space-x-3 ${isLocating ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <svg className={`w-4 h-4 ${isLocating ? 'animate-spin' : 'animate-pulse'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              <span>{isLocating ? 'Synchronizing...' : 'Sync Live Location'}</span>
+            </button>
+          )}
+          {isOwnProfile && (
+            <button 
+              onClick={() => setIsEditProfileOpen(true)}
+              className="px-8 py-4 bg-white border-2 border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition shadow-sm"
+            >
+              Edit Records
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-10">
@@ -209,6 +254,7 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user: currentUser, onUp
                 { label: 'Age', value: targetUser.age + ' Years' },
                 { label: 'Blood Group', value: targetUser.bloodType },
                 { label: 'Genotype', value: targetUser.genotype },
+                { label: 'GPS Coordinates', value: targetUser.location ? `${targetUser.location.lat.toFixed(4)}, ${targetUser.location.lng.toFixed(4)}` : 'No Uplink', highlight: !!targetUser.location },
                 { label: 'Phone', value: targetUser.phone },
                 { label: 'Address', value: targetUser.address },
                 { label: 'Emergency Name', value: targetUser.emergencyContactName, highlight: true },

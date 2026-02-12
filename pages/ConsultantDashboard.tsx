@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, Appointment, MedicalReport, Prescription } from '../types.ts';
+import { User, UserRole, Appointment, MedicalReport, Prescription, ChatThread } from '../types.ts';
 import { summarizePatientHistory, analyzeMedicalReport } from '../services/geminiService.ts';
 import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
 import { ClinicalAPI } from '../services/apiService.ts';
@@ -18,6 +18,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
   const [prescribingFor, setPrescribingFor] = useState<MedicalReport | null>(null);
   const [prescriptionData, setPrescriptionData] = useState({ medications: '', dosage: '' });
   const [loadingAI, setLoadingAI] = useState(false);
+  const [activeThreads, setActiveThreads] = useState<ChatThread[]>([]);
   
   // Existing state
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -25,12 +26,15 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
   const [selectedPatient, setSelectedPatient] = useState<{id: string, name: string} | null>(null);
 
   useEffect(() => {
-    const fetchData = () => {
+    const fetchData = async () => {
       const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
       setAppointments(allApps.filter(a => a.consultantId === user.id));
 
       const allReports: MedicalReport[] = JSON.parse(localStorage.getItem('medi_reports') || '[]');
       setReports(allReports.filter(r => r.status === 'pending_review'));
+
+      const threads = await ClinicalAPI.getActiveThreads(user.id);
+      setActiveThreads(threads);
     };
 
     fetchData();
@@ -90,6 +94,13 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
     alert("Prescription synchronized with Pharmacy Hub.");
   };
 
+  const openChat = (thread: ChatThread) => {
+    const otherId = thread.participants.find(id => id !== user.id);
+    const patientName = thread.lastMessage?.senderId === otherId ? thread.lastMessage.senderName : "Patient";
+    setSelectedPatient({ id: otherId || '', name: patientName });
+    setIsCommOpen(true);
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
       <div className="flex justify-between items-center mb-10">
@@ -116,6 +127,30 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                 <div className="text-center py-10 text-slate-400 text-sm italic">No reports pending vetting.</div>
               )}
             </div>
+          </section>
+
+          {/* Clinical Dialogues Registry (New section for Consultants) */}
+          <section className="bg-white rounded-[3rem] p-8 border border-slate-100 shadow-xl">
+             <h2 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6">Patient Consultations (Chat)</h2>
+             <div className="space-y-3">
+               {activeThreads.length > 0 ? activeThreads.map(thread => (
+                 <button 
+                  key={thread.chatId} 
+                  onClick={() => openChat(thread)}
+                  className="w-full flex items-center justify-between p-5 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-white hover:border-emerald-600 transition group text-left"
+                 >
+                   <div>
+                     <p className="font-bold text-slate-900 text-sm">{thread.lastMessage?.senderId !== user.id ? thread.lastMessage?.senderName : "Patient Session"}</p>
+                     <p className="text-[9px] text-slate-400 font-medium truncate max-w-[150px]">{thread.lastMessage?.text || "Secure channel open"}</p>
+                   </div>
+                   <div className="text-right">
+                     <span className="text-[8px] font-black uppercase text-slate-300 block">{thread.lastMessage?.time || "Active"}</span>
+                   </div>
+                 </button>
+               )) : (
+                 <div className="text-center py-6 text-slate-400 text-xs italic">No active chat sessions.</div>
+               )}
+             </div>
           </section>
 
           <section className="bg-slate-900 rounded-[3rem] p-8 text-white shadow-2xl">

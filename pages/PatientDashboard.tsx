@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { User, UserRole, MedicalReport, Prescription, DeliveryOrder } from '../types.ts';
+import { User, UserRole, MedicalReport, Prescription, DeliveryOrder, ChatThread } from '../types.ts';
 import { analyzeSymptoms, getHealthTips } from '../services/geminiService.ts';
 import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
 import { ClinicalAPI } from '../services/apiService.ts';
@@ -103,13 +103,14 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryOrder[]>([]);
   const [consultants, setConsultants] = useState<User[]>([]);
+  const [activeThreads, setActiveThreads] = useState<ChatThread[]>([]);
   
   const [showInput, setShowInput] = useState(true);
   const [isCommOpen, setIsCommOpen] = useState(false);
   const [selectedConsultant, setSelectedConsultant] = useState<{name: string, role: string, id: string} | null>(null);
 
   useEffect(() => {
-    const fetchData = () => {
+    const fetchData = async () => {
       const allUsers: User[] = JSON.parse(localStorage.getItem('medi_registered_users') || '[]');
       setConsultants(allUsers.filter(u => u.role === UserRole.CONSULTANT && u.isApproved));
       
@@ -121,6 +122,9 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
 
       const allDeliveries: DeliveryOrder[] = JSON.parse(localStorage.getItem('medi_deliveries') || '[]');
       setDeliveries(allDeliveries.filter(d => d.patientId === user.id));
+
+      const threads = await ClinicalAPI.getActiveThreads(user.id);
+      setActiveThreads(threads);
     };
 
     fetchData();
@@ -166,6 +170,15 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
     }
   };
 
+  const openChat = (thread: ChatThread) => {
+    const otherId = thread.participants.find(id => id !== user.id);
+    const consultant = consultants.find(c => c.id === otherId);
+    if (consultant) {
+      setSelectedConsultant({ id: consultant.id, name: consultant.name, role: 'Consultant' });
+      setIsCommOpen(true);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
       <TreatmentTimeline prescriptions={prescriptions} deliveries={deliveries} />
@@ -182,6 +195,52 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
                <svg className="w-40 h-40" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
             </div>
           </div>
+
+          {/* Clinical Dialogues (New Chatting Section) */}
+          <section className="bg-white rounded-[2rem] border border-slate-200 p-10 shadow-sm">
+             <div className="flex justify-between items-center mb-8">
+               <h2 className="text-2xl font-black text-slate-900 tracking-tight">Clinical Dialogues</h2>
+               <Link to="/find-doctor" className="text-[10px] font-black uppercase text-emerald-600 hover:underline">Start New Consultation</Link>
+             </div>
+             <div className="space-y-4">
+               {activeThreads.length > 0 ? activeThreads.map(thread => {
+                 const otherId = thread.participants.find(id => id !== user.id);
+                 const consultant = consultants.find(c => c.id === otherId);
+                 if (!consultant) return null;
+
+                 return (
+                   <button 
+                    key={thread.chatId} 
+                    onClick={() => openChat(thread)}
+                    className="w-full flex items-center justify-between p-6 bg-slate-50 border border-slate-100 rounded-[2rem] hover:bg-white hover:border-emerald-500 hover:shadow-xl transition-all duration-300 group text-left"
+                   >
+                     <div className="flex items-center space-x-6">
+                       <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-emerald-600 shadow-sm group-hover:bg-emerald-50 transition font-black">
+                         {consultant.name.charAt(0)}
+                       </div>
+                       <div>
+                         <p className="font-black text-slate-900">Dr. {consultant.name}</p>
+                         <p className="text-[10px] text-slate-400 font-medium truncate max-w-[200px]">
+                           {thread.lastMessage?.text || "Started a new secure session"}
+                         </p>
+                       </div>
+                     </div>
+                     <div className="text-right">
+                        <span className="text-[8px] font-black uppercase text-slate-300 block mb-1">{thread.lastMessage?.time || "Active"}</span>
+                        <div className="flex items-center justify-end">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span className="text-[8px] font-black uppercase ml-1.5 text-emerald-600">Encrypted Relay</span>
+                        </div>
+                     </div>
+                   </button>
+                 );
+               }) : (
+                 <div className="text-center py-10 bg-slate-50/50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No Active Sessions</p>
+                 </div>
+               )}
+             </div>
+          </section>
 
           {/* AI Symptom Checker */}
           <section className="bg-white rounded-[2rem] border border-slate-200 p-10 shadow-sm">
@@ -277,6 +336,22 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
           <section className="bg-emerald-600 rounded-[3rem] p-10 text-white shadow-xl relative overflow-hidden">
             <div className="relative z-10">
               <h2 className="text-xl font-black mb-8 tracking-tight">Identity Hub</h2>
+              
+              {/* Location Sync Status Indicator */}
+              <div className="mb-6 p-4 bg-white/10 rounded-2xl border border-white/20">
+                <p className="text-[8px] font-black uppercase tracking-[0.2em] mb-2 opacity-70">Logistics Precision</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-widest">GPS Uplink</span>
+                  <div className="flex items-center">
+                    <div className={`w-2 h-2 rounded-full mr-2 ${user.location ? 'bg-emerald-400 animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.8)]' : 'bg-white/30'}`}></div>
+                    <span className="text-[10px] font-black uppercase tracking-widest">{user.location ? 'Synchronized' : 'No Uplink'}</span>
+                  </div>
+                </div>
+                {!user.location && (
+                  <Link to="/profile" className="mt-3 block text-[8px] font-black uppercase tracking-widest text-center py-2 bg-white/20 rounded-lg hover:bg-white/30 transition">Establish Sync in Profile</Link>
+                )}
+              </div>
+
               <div className="space-y-4">
                 <Link to="/find-doctor" className="flex items-center justify-between w-full p-5 bg-white/10 hover:bg-white/20 rounded-2xl transition border border-white/10 group">
                   <span className="text-[10px] font-black uppercase tracking-widest">Specialist Network</span>
