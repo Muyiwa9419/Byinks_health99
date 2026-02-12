@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { User, UserRole, MedicalReport, Prescription, DeliveryOrder, ChatThread } from '../types.ts';
+import { User, UserRole, MedicalReport, Prescription, DeliveryOrder, ChatThread, Appointment } from '../types.ts';
 import { analyzeSymptoms, getHealthTips } from '../services/geminiService.ts';
 import CommunicationOverlay from '../components/CommunicationOverlay.tsx';
 import { ClinicalAPI } from '../services/apiService.ts';
@@ -13,7 +13,6 @@ interface PatientDashboardProps {
 const TreatmentTimeline: React.FC<{ prescriptions: Prescription[]; deliveries: DeliveryOrder[] }> = ({ prescriptions, deliveries }) => {
   if (prescriptions.length === 0) return null;
 
-  // Track the most recent active treatment
   const latestPrescription = [...prescriptions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
   const activeDelivery = deliveries.find(d => d.prescriptionId === latestPrescription.id);
 
@@ -109,6 +108,17 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
   const [isCommOpen, setIsCommOpen] = useState(false);
   const [selectedConsultant, setSelectedConsultant] = useState<{name: string, role: string, id: string} | null>(null);
 
+  // Appointment Booking State
+  const [isBookingOpen, setIsBookingOpen] = useState(false);
+  const [bookingForm, setBookingForm] = useState({
+    consultantId: '',
+    date: '',
+    time: '',
+    notes: ''
+  });
+
+  const timeSlots = ['08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
+
   useEffect(() => {
     const fetchData = async () => {
       const allUsers: User[] = JSON.parse(localStorage.getItem('medi_registered_users') || '[]');
@@ -170,6 +180,41 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
     }
   };
 
+  const handleBookAppointment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bookingForm.consultantId || !bookingForm.date || !bookingForm.time) return;
+
+    const consultant = consultants.find(c => c.id === bookingForm.consultantId);
+    if (!consultant) return;
+
+    const appointment: Appointment = {
+      id: Math.random().toString(36).substr(2, 9),
+      patientId: user.id,
+      patientName: user.name,
+      consultantId: consultant.id,
+      consultantName: consultant.name,
+      date: bookingForm.date,
+      time: bookingForm.time,
+      status: 'pending',
+      notes: bookingForm.notes,
+      paymentStatus: 'pending',
+      fee: 45
+    };
+
+    const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    await ClinicalAPI.saveAppointments([...allApps, appointment]);
+    
+    await ClinicalAPI.addNotification(
+      consultant.id,
+      'New Appointment Request',
+      `${user.name} has requested a session for ${bookingForm.date} at ${bookingForm.time}.`
+    );
+
+    alert("Booking protocol initialized. The specialist has been notified.");
+    setIsBookingOpen(false);
+    setBookingForm({ consultantId: '', date: '', time: '', notes: '' });
+  };
+
   const openChat = (thread: ChatThread) => {
     const otherId = thread.participants.find(id => id !== user.id);
     const consultant = consultants.find(c => c.id === otherId);
@@ -190,6 +235,12 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
             <div className="relative z-10">
               <h1 className="text-4xl font-extrabold mb-2">Welcome Back, {user.name}</h1>
               <p className="text-emerald-100 font-medium max-w-md">Your health status is being monitored in real-time by the MediSphere core.</p>
+              <button 
+                onClick={() => setIsBookingOpen(true)}
+                className="mt-8 px-8 py-4 bg-white text-emerald-900 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-50 transition-all shadow-xl"
+              >
+                Schedule Consultation
+              </button>
             </div>
             <div className="absolute top-0 right-0 p-8 opacity-20">
                <svg className="w-40 h-40" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
@@ -353,6 +404,13 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
               </div>
 
               <div className="space-y-4">
+                <button 
+                  onClick={() => setIsBookingOpen(true)}
+                  className="flex items-center justify-between w-full p-5 bg-white/10 hover:bg-white/20 rounded-2xl transition border border-white/10 group"
+                >
+                  <span className="text-[10px] font-black uppercase tracking-widest">Schedule Engagement</span>
+                  <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+                </button>
                 <Link to="/find-doctor" className="flex items-center justify-between w-full p-5 bg-white/10 hover:bg-white/20 rounded-2xl transition border border-white/10 group">
                   <span className="text-[10px] font-black uppercase tracking-widest">Specialist Network</span>
                   <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
@@ -367,6 +425,55 @@ const PatientDashboard: React.FC<PatientDashboardProps> = ({ user }) => {
           </section>
         </div>
       </div>
+
+      {/* Booking Modal */}
+      {isBookingOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsBookingOpen(false)}></div>
+          <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] shadow-2xl p-10">
+            <h3 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Direct Engagement</h3>
+            <form onSubmit={handleBookAppointment} className="space-y-6">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Select Specialist</label>
+                <select 
+                  required 
+                  value={bookingForm.consultantId} 
+                  onChange={(e) => setBookingForm({...bookingForm, consultantId: e.target.value})}
+                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition"
+                >
+                  <option value="">Select Consultant</option>
+                  {consultants.map(c => <option key={c.id} value={c.id}>Dr. {c.name} ({c.specialty})</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Preferred Date</label>
+                  <input type="date" required value={bookingForm.date} onChange={(e) => setBookingForm({...bookingForm, date: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Preferred Time</label>
+                  <select required value={bookingForm.time} onChange={(e) => setBookingForm({...bookingForm, time: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-emerald-600 transition">
+                    <option value="">Select Time</option>
+                    {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">Engagement Notes</label>
+                <textarea 
+                  value={bookingForm.notes} 
+                  onChange={(e) => setBookingForm({...bookingForm, notes: e.target.value})} 
+                  placeholder="Primary concern or clinical history..."
+                  className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none h-24 resize-none focus:border-emerald-600 transition"
+                />
+              </div>
+              <button type="submit" className="w-full bg-emerald-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-emerald-700 transition shadow-xl shadow-emerald-200">
+                Authorize Appointment
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {selectedConsultant && (
         <CommunicationOverlay 
