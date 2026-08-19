@@ -168,3 +168,4 @@ directly and uses Supabase only for broadcast. To connect it to this backend:
   URL (e.g. `https://byinks-health.vercel.app`).
 - Run `npm run seed` once against the production database to bootstrap the
   admin account, then change that password immediately.
+postgresql://byinks_health_db_user:LnAyEg7CONxor5HZKCWshZw4FM6JmYbh@dpg-da2nqdflk1mc73cj2t50-a/byinks_health_db
