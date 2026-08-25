@@ -239,18 +239,21 @@ useEffect(() => {
       setConsultants(consultantsFromDatabase);
 
       // ==============================
-      // MEDICAL REPORTS
-      // ==============================
+// MEDICAL REPORTS
+// FROM POSTGRESQL
+// ==============================
 
-      const allReports: MedicalReport[] = JSON.parse(
-        localStorage.getItem('medi_reports') || '[]'
-      );
+const reportsFromDatabase =
+  await ClinicalAPI.getReports({
+    patientId: user.id,
+  });
 
-      setReports(
-        allReports.filter(
-          r => r.patientId === user.id
-        )
-      );
+console.log(
+  'DATABASE MEDICAL REPORTS:',
+  reportsFromDatabase
+);
+
+setReports(reportsFromDatabase);
 
       // ==============================
       // PRESCRIPTIONS
@@ -307,21 +310,59 @@ useEffect(() => {
 }, [user.id]);
 
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files?.length) return;
-    const file = e.target.files[0];
-    const newReport: MedicalReport = {
-      id: Math.random().toString(36).substr(2, 9),
+  const handleFileUpload = async (
+  e: React.ChangeEvent<HTMLInputElement>
+) => {
+  if (!e.target.files?.length) return;
+
+  const file = e.target.files[0];
+
+  try {
+    const report = await ClinicalAPI.createReport({
       patientId: user.id,
       patientName: user.name,
       fileName: file.name,
+      fileUrl: '',
       uploadDate: new Date().toLocaleDateString(),
-      status: 'pending_review'
-    };
-    const allReports: MedicalReport[] = JSON.parse(localStorage.getItem('medi_reports') || '[]');
-    ClinicalAPI.saveReports([...allReports, newReport]);
-    ClinicalAPI.addNotification(user.id, "Report Uploaded", "Your report is now in the vetting queue.");
-  };
+      status: 'pending_review',
+    });
+
+    console.log(
+      'MEDICAL REPORT CREATED:',
+      report
+    );
+
+    setReports(prev => [
+      report,
+      ...prev
+    ]);
+
+    await ClinicalAPI.addNotification(
+      user.id,
+      'Report Uploaded',
+      'Your report is now in the vetting queue.'
+    );
+
+    alert(
+      'Medical report uploaded successfully and sent for consultant review.'
+    );
+
+    // Allow the same file to be selected again later
+    e.target.value = '';
+
+  } catch (error) {
+    console.error(
+      'Medical report upload failed:',
+      error
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Failed to upload medical report.'
+    );
+  }
+};
 
   const handleSymptomCheck = async (e: React.FormEvent) => {
     e.preventDefault();

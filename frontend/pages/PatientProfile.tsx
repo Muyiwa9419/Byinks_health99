@@ -44,11 +44,23 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user: currentUser, onUp
       setTargetUser(profile);
       if (profile) setEditData(profile);
 
-      const storedApps = localStorage.getItem('medi_appointments');
-      if (storedApps && profile) {
-        const all = JSON.parse(storedApps);
-        setAppointments(all.filter((a: Appointment) => a.patientId === profile.id));
-      }
+      if (profile) {
+  try {
+    const backendAppointments =
+      await ClinicalAPI.getAppointments({
+        patientId: profile.id,
+      });
+
+    setAppointments(backendAppointments);
+  } catch (error) {
+    console.error(
+      'Failed to load appointments from backend:',
+      error
+    );
+
+    setAppointments([]);
+  }
+}
 
       const storedUsers = localStorage.getItem('medi_registered_users');
       if (storedUsers) {
@@ -169,39 +181,82 @@ const PatientProfile: React.FC<PatientProfileProps> = ({ user: currentUser, onUp
   };
 
   const handleBookAppointment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newApp.consultantId || !newApp.date || !newApp.time || !targetUser) return;
+  e.preventDefault();
 
-    const consultant = consultants.find(c => c.id === newApp.consultantId);
-    if (!consultant) return;
+  if (
+    !newApp.consultantId ||
+    !newApp.date ||
+    !newApp.time ||
+    !targetUser
+  ) {
+    return;
+  }
 
-    const appointment: Appointment = {
-      id: Math.random().toString(36).substr(2, 9),
-      patientId: targetUser.id,
-      patientName: targetUser.name,
+  const consultant = consultants.find(
+    c => c.id === newApp.consultantId
+  );
+
+  if (!consultant) {
+    alert('Consultant not found.');
+    return;
+  }
+
+  try {
+    // Create the appointment in the backend/PostgreSQL
+    const appointment = await ClinicalAPI.createAppointment({
       consultantId: consultant.id,
-      consultantName: consultant.name,
       date: newApp.date,
       time: newApp.time,
-      status: 'pending',
-      notes: newApp.notes,
-      paymentStatus: 'pending',
-      fee: 45
-    };
+      notes: newApp.notes || '',
+      fee: 45,
+    } as Omit<Appointment, 'id'>);
 
-    const allApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
-    const updatedApps = [...allApps, appointment];
-    await ClinicalAPI.saveAppointments(updatedApps);
-    
-    addNotification(
+    console.log(
+      '[appointment] Created successfully:',
+      appointment
+    );
+
+    // Refresh appointments from the backend
+    const refreshedAppointments =
+      await ClinicalAPI.getAppointments({
+        patientId: targetUser.id,
+      });
+
+    setAppointments(refreshedAppointments);
+
+    // Notify consultant
+    await addNotification(
       consultant.id,
       'New Appointment Request',
       `${targetUser.name} requested an appointment for ${newApp.date} at ${newApp.time}.`
     );
 
     setIsBookingOpen(false);
-    setNewApp({ consultantId: '', date: '', time: '', notes: '' });
-  };
+
+    setNewApp({
+      consultantId: '',
+      date: '',
+      time: '',
+      notes: '',
+    });
+
+    alert('Appointment booked successfully.');
+
+  } catch (error) {
+    console.error(
+      '[appointment] Booking failed:',
+      error
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Failed to book appointment. Please try again.'
+    );
+  }
+};
+
+    
 
   if (!targetUser) return <div className="p-20 text-center font-black text-slate-300">Identity Not Found</div>;
 
