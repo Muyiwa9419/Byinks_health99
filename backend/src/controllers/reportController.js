@@ -133,26 +133,12 @@ async function createReport(req, res) {
   }
 }
 
+
 // =====================================================
 // GET /api/reports/:id/file
 // =====================================================
-// Securely returns the file information for a report.
-//
-// PATIENT:
-//   Can access their own report.
-//
-// CONSULTANT:
-//   Can access the report if they have an appointment
-//   with the patient.
-//
-// ADMIN:
-//   Can access any report.
-// =====================================================
 async function getReportFile(req, res) {
   try {
-    // ===================================================
-    // FIND REPORT
-    // ===================================================
     const report = await MedicalReport.findByPk(req.params.id);
 
     if (!report) {
@@ -167,8 +153,7 @@ async function getReportFile(req, res) {
     if (req.user.role === 'PATIENT') {
       if (report.patientId !== req.user.id) {
         return res.status(403).json({
-          error:
-            'You are not authorized to access this report',
+          error: 'You are not authorized to access this report',
         });
       }
     }
@@ -207,8 +192,7 @@ async function getReportFile(req, res) {
     // ===================================================
     if (!report.fileUrl) {
       return res.status(404).json({
-        error:
-          'This report does not have an attached file',
+        error: 'This report does not have an attached file',
       });
     }
 
@@ -225,7 +209,10 @@ async function getReportFile(req, res) {
       status: report.status,
     });
   } catch (error) {
-    console.error('Get report file error:', error);
+    console.error(
+      'Get report file error:',
+      error
+    );
 
     return res.status(500).json({
       error: 'Failed to retrieve medical report',

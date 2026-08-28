@@ -8,6 +8,7 @@ const morgan = require('morgan');
 
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const appointmentRoutes = require('./routes/appointmentRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const prescriptionRoutes = require('./routes/prescriptionRoutes');
@@ -16,26 +17,47 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const syncRoutes = require('./routes/syncRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
-
-console.log('====================================');
-console.log('BYINKS HEALTH BACKEND VERSION TEST');
-console.log('REPORT ROUTES SHOULD BE ACTIVE');
-console.log('====================================');
 
 const corsOrigins = (process.env.CLIENT_ORIGINS || '')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
 
-app.use(helmet());
-app.use(cors({ origin: corsOrigins.length ? corsOrigins : '*', credentials: true }));
-app.use(express.json({ limit: '5mb' }));
-app.use(morgan(process.env.NODE_ENV === 'development' ? 'dev' : 'combined'));
+app.use(
+  helmet()
+);
 
-app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+app.use(
+  cors({
+    origin: corsOrigins.length ? corsOrigins : '*',
+    credentials: true,
+  })
+);
+
+app.use(
+  express.json({
+    limit: '5mb',
+  })
+);
+
+app.use(
+  morgan(
+    process.env.NODE_ENV === 'development'
+      ? 'dev'
+      : 'combined'
+  )
+);
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    time: new Date().toISOString(),
+  });
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -52,4 +74,7 @@ app.use('/api/chat', chatRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
-module.exports = { app, corsOrigins };
+module.exports = {
+  app,
+  corsOrigins,
+};
