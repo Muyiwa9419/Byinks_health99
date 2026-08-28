@@ -44,37 +44,6 @@ const ConsultantProfile: React.FC<ConsultantProfileProps> = ({ user }) => {
   }, [user.id]);
 
   /*
-   * Update profile
-   */
-  const handleProfileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    setSavingProfile(true);
-    setProfileMessage('');
-
-    try {
-      await ClinicalAPI.saveProfile(profile);
-
-      localStorage.setItem(
-        'medi_local_session',
-        JSON.stringify(profile)
-      );
-
-      setProfileMessage('Profile updated successfully.');
-    } catch (error) {
-      console.error('Profile update error:', error);
-
-      setProfileMessage(
-        error instanceof Error
-          ? error.message
-          : 'Failed to update profile.'
-      );
-    } finally {
-      setSavingProfile(false);
-    }
-  };
-
-  /*
    * Change password
    */
   const handlePasswordChange = async (e: React.FormEvent) => {
@@ -122,6 +91,31 @@ const ConsultantProfile: React.FC<ConsultantProfileProps> = ({ user }) => {
     }
   };
 
+
+  const handleProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    setSavingProfile(true);
+    setProfileMessage('');
+
+    try {
+      await ClinicalAPI.saveProfile(profile);
+
+      setProfileMessage(
+        'Professional profile updated successfully.'
+      );
+    } catch (error) {
+      console.error('Profile update error:', error);
+
+      setProfileMessage(
+        error instanceof Error
+          ? error.message
+          : 'Failed to update profile.'
+      );
+    } finally {
+      setSavingProfile(false);
+    }
+  };
   /*
    * Toggle availability for a day
    */
@@ -376,6 +370,9 @@ const ConsultantProfile: React.FC<ConsultantProfileProps> = ({ user }) => {
           </p>
         </div>
 
+
+
+
         <form onSubmit={handlePasswordChange} className="space-y-6">
 
           <div>
@@ -473,22 +470,20 @@ const ConsultantProfile: React.FC<ConsultantProfileProps> = ({ user }) => {
                   key={day}
                   type="button"
                   onClick={() => toggleDay(day)}
-                  className={`w-full flex items-center justify-between p-5 rounded-2xl border transition ${
-                    isBlocked
+                  className={`w-full flex items-center justify-between p-5 rounded-2xl border transition ${isBlocked
                       ? 'bg-slate-50 border-slate-100'
                       : 'bg-emerald-50 border-emerald-100'
-                  }`}
+                    }`}
                 >
                   <span className="font-bold text-slate-900">
                     {day}
                   </span>
 
                   <span
-                    className={`text-[9px] font-black uppercase tracking-widest ${
-                      isBlocked
+                    className={`text-[9px] font-black uppercase tracking-widest ${isBlocked
                         ? 'text-slate-400'
                         : 'text-emerald-600'
-                    }`}
+                      }`}
                   >
                     {isBlocked
                       ? 'Unavailable'

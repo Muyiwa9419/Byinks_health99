@@ -31,7 +31,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const [isOnboardOpen, setIsOnboardOpen] = useState(false);
 
   // Onboarding Form State
-  const [onboardForm, setOnboardForm] = useState({
+  setOnboardForm({
   name: '',
   email: '',
   password: '',
@@ -47,7 +47,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     const totalPatients = users.filter(u => u.role === UserRole.PATIENT).length;
     const activeConsultants = users.filter(u => (u.role === UserRole.CONSULTANT || u.role === UserRole.PHARMACY || u.role === UserRole.DISPATCH) && u.isApproved).length;
     
-    const storedApps: Appointment[] = JSON.parse(localStorage.getItem('medi_appointments') || '[]');
+    const appointments =
+  await ClinicalAPI.getAppointments();
     const storedTrans: Transaction[] = JSON.parse(localStorage.getItem('medi_transactions') || '[]');
     const storedLogs: AuditLog[] = JSON.parse(localStorage.getItem('medi_audit_logs') || '[]');
 

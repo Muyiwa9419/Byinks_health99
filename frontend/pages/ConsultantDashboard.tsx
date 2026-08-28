@@ -16,7 +16,9 @@ interface ConsultantDashboardProps {
   user: User;
 }
 
-const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
+const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({
+  user,
+}) => {
   const [reports, setReports] = useState<MedicalReport[]>([]);
   const [selectedReport, setSelectedReport] =
     useState<MedicalReport | null>(null);
@@ -51,20 +53,28 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        console.log('Loading consultant dashboard for:', user.id);
+        console.log(
+          'Loading consultant dashboard for:',
+          user.id
+        );
 
         // Load consultant appointments
         const apps = await ClinicalAPI.getAppointments({
           consultantId: user.id,
         });
 
-        console.log('CONSULTANT APPOINTMENTS:', apps);
+        console.log(
+          'CONSULTANT APPOINTMENTS:',
+          apps
+        );
+
         setAppointments(apps);
 
         // Load reports waiting for review
-        const pendingReports = await ClinicalAPI.getReports({
-          status: 'pending_review',
-        });
+        const pendingReports =
+          await ClinicalAPI.getReports({
+            status: 'pending_review',
+          });
 
         console.log(
           'CONSULTANT REPORTS FROM DATABASE:',
@@ -74,9 +84,13 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
         setReports(pendingReports);
 
         // Load active chat sessions
-        const threads = await ClinicalAPI.getActiveThreads(user.id);
+        const threads =
+          await ClinicalAPI.getActiveThreads(user.id);
 
-        console.log('ACTIVE CHAT THREADS:', threads);
+        console.log(
+          'ACTIVE CHAT THREADS:',
+          threads
+        );
 
         setActiveThreads(threads);
       } catch (error) {
@@ -93,40 +107,188 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       fetchData();
     };
 
-    window.addEventListener('storage', handleStorage);
+    window.addEventListener(
+      'storage',
+      handleStorage
+    );
 
     return () => {
-      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener(
+        'storage',
+        handleStorage
+      );
     };
   }, [user.id]);
 
   /*
    * ============================================================
-   * OPEN / REVIEW MEDICAL REPORT
+   * OPEN MEDICAL REPORT
    * ============================================================
    */
 
-  const handleVetReport = async (report: MedicalReport) => {
+  const handleOpenReport = async (
+    report: MedicalReport
+  ) => {
+    try {
+      const result =
+        await ClinicalAPI.getReportFile(
+          report.id
+        );
+
+      if (!result.fileUrl) {
+        alert(
+          'This report does not have an attached file.'
+        );
+        return;
+      }
+
+      window.open(
+        result.fileUrl,
+        '_blank',
+        'noopener,noreferrer'
+      );
+    } catch (error) {
+      console.error(
+        'Failed to open medical report:',
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : 'Unable to open medical report'
+      );
+    }
+  };
+
+  /*
+   * ============================================================
+   * DOWNLOAD MEDICAL REPORT
+   * ============================================================
+   */
+
+  const handleDownloadReport = async (
+    report: MedicalReport
+  ) => {
+    try {
+      const result =
+        await ClinicalAPI.getReportFile(
+          report.id
+        );
+
+      if (!result.fileUrl) {
+        alert(
+          'This report does not have an attached file.'
+        );
+        return;
+      }
+
+      const response = await fetch(
+        result.fileUrl
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          'Unable to download the report file'
+        );
+      }
+
+      const blob = await response.blob();
+
+      const blobUrl =
+        window.URL.createObjectURL(blob);
+
+      const link =
+        document.createElement('a');
+
+      link.href = blobUrl;
+
+      link.download =
+        result.fileName ||
+        report.fileName ||
+        'medical-report';
+
+      document.body.appendChild(link);
+
+      link.click();
+
+      document.body.removeChild(link);
+
+      window.URL.revokeObjectURL(
+        blobUrl
+      );
+    } catch (error) {
+      console.error(
+        'Failed to download medical report:',
+        error
+      );
+
+      // Fallback: open the file if the storage
+      // provider does not allow browser download.
+      try {
+        const result =
+          await ClinicalAPI.getReportFile(
+            report.id
+          );
+
+        if (result.fileUrl) {
+          window.open(
+            result.fileUrl,
+            '_blank',
+            'noopener,noreferrer'
+          );
+        }
+      } catch (fallbackError) {
+        console.error(
+          'Report download fallback failed:',
+          fallbackError
+        );
+
+        alert(
+          error instanceof Error
+            ? error.message
+            : 'Unable to download medical report'
+        );
+      }
+    }
+  };
+
+  /*
+   * ============================================================
+   * VET MEDICAL REPORT
+   * ============================================================
+   */
+
+  const handleVetReport = async (
+    report: MedicalReport
+  ) => {
     try {
       setSelectedReport(report);
       setLoadingAI(true);
       setAiReportInsight('');
 
-      const profile = await ClinicalAPI.getProfile(report.patientId);
+      const profile =
+        await ClinicalAPI.getProfile(
+          report.patientId
+        );
 
       setPatientData(profile);
 
-      const insight = await analyzeMedicalReport(
-        `Patient: ${report.patientName}, File: ${
-          report.fileName
-        }, Emergency Contact: ${
-          profile?.emergencyContactName || 'None'
-        }`
-      );
+      const insight =
+        await analyzeMedicalReport(
+          `Patient: ${report.patientName}, File: ${
+            report.fileName
+          }, Emergency Contact: ${
+            profile?.emergencyContactName || 'None'
+          }`
+        );
 
       setAiReportInsight(insight);
     } catch (error) {
-      console.error('Failed to load report:', error);
+      console.error(
+        'Failed to load report:',
+        error
+      );
 
       setAiReportInsight(
         'Unable to generate clinical insight.'
@@ -151,25 +313,41 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
 
     try {
       const newPrescription: Prescription = {
-        id: Math.random().toString(36).substr(2, 9),
-        patientId: prescribingFor.patientId,
-        patientName: prescribingFor.patientName,
+        id: Math.random()
+          .toString(36)
+          .substr(2, 9),
+
+        patientId:
+          prescribingFor.patientId,
+
+        patientName:
+          prescribingFor.patientName,
+
         consultantId: user.id,
+
         consultantName: user.name,
-        medications: prescriptionData.medications,
-        dosage: prescriptionData.dosage,
-        date: new Date().toLocaleDateString(),
+
+        medications:
+          prescriptionData.medications,
+
+        dosage:
+          prescriptionData.dosage,
+
+        date:
+          new Date().toLocaleDateString(),
+
         status: 'sent_to_pharmacy',
       };
 
       /*
        * Save prescription locally.
-       *
-       * This preserves your current ClinicalAPI implementation.
        */
-      const allPrescriptions: Prescription[] = JSON.parse(
-        localStorage.getItem('medi_prescriptions') || '[]'
-      );
+      const allPrescriptions: Prescription[] =
+        JSON.parse(
+          localStorage.getItem(
+            'medi_prescriptions'
+          ) || '[]'
+        );
 
       await ClinicalAPI.savePrescriptions([
         ...allPrescriptions,
@@ -177,24 +355,27 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       ]);
 
       /*
-       * Mark report as vetted in PostgreSQL
+       * Mark report as vetted in PostgreSQL.
        */
       await ClinicalAPI.reviewReport(
         prescribingFor.id,
         {
           status: 'vetted',
+
           consultantNote:
             'Report reviewed and prescription issued.',
+
           vettedBy: user.id,
         }
       );
 
       /*
-       * Reload pending reports
+       * Reload pending reports.
        */
-      const updatedReports = await ClinicalAPI.getReports({
-        status: 'pending_review',
-      });
+      const updatedReports =
+        await ClinicalAPI.getReports({
+          status: 'pending_review',
+        });
 
       console.log(
         'UPDATED CONSULTANT REPORTS:',
@@ -204,7 +385,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       setReports(updatedReports);
 
       /*
-       * Notify patient
+       * Notify patient.
        */
       await ClinicalAPI.addNotification(
         prescribingFor.patientId,
@@ -213,15 +394,20 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       );
 
       /*
-       * Notify pharmacies
+       * Notify pharmacies.
        */
-      const registeredUsers: User[] = JSON.parse(
-        localStorage.getItem('medi_registered_users') || '[]'
-      );
+      const registeredUsers: User[] =
+        JSON.parse(
+          localStorage.getItem(
+            'medi_registered_users'
+          ) || '[]'
+        );
 
-      const pharmacies = registeredUsers.filter(
-        (u) => u.role === UserRole.PHARMACY
-      );
+      const pharmacies =
+        registeredUsers.filter(
+          (u) =>
+            u.role === UserRole.PHARMACY
+        );
 
       for (const pharmacy of pharmacies) {
         await ClinicalAPI.addNotification(
@@ -232,7 +418,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
       }
 
       /*
-       * Reset UI
+       * Reset UI.
        */
       setPrescribingFor(null);
       setSelectedReport(null);
@@ -266,15 +452,19 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
    * ============================================================
    */
 
-  const openChat = (thread: ChatThread) => {
-    const otherId = thread.participants.find(
-      (id) => id !== user.id
-    );
+  const openChat = (
+    thread: ChatThread
+  ) => {
+    const otherId =
+      thread.participants.find(
+        (id) => id !== user.id
+      );
 
     if (!otherId) return;
 
     const patientName =
-      thread.lastMessage?.senderId === otherId
+      thread.lastMessage?.senderId ===
+      otherId
         ? thread.lastMessage.senderName
         : 'Patient';
 
@@ -318,7 +508,8 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
           </h1>
 
           <span className="inline-block mt-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">
-            {user.specialty || 'Specialty not set'}
+            {user.specialty ||
+              'Specialty not set'}
           </span>
         </div>
 
@@ -368,19 +559,51 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                       </p>
                     </div>
 
-                    <button
-                      onClick={() =>
-                        handleVetReport(report)
-                      }
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md hover:bg-emerald-700 transition"
-                    >
-                      Vet Report
-                    </button>
+                    <div className="flex items-center gap-2">
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenReport(
+                            report
+                          )
+                        }
+                        className="px-3 py-2 bg-white text-slate-700 border border-slate-200 rounded-xl text-[9px] font-black uppercase tracking-widest hover:border-emerald-600 hover:text-emerald-600 transition"
+                      >
+                        View
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadReport(
+                            report
+                          )
+                        }
+                        className="px-3 py-2 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-800 transition"
+                      >
+                        Download
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleVetReport(
+                            report
+                          )
+                        }
+                        className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md hover:bg-emerald-700 transition"
+                      >
+                        Vet
+                      </button>
+
+                    </div>
                   </div>
                 ))
               ) : (
                 <div className="text-center py-10 text-slate-400 text-sm italic">
-                  No reports pending vetting.
+                  No reports pending
+                  vetting.
                 </div>
               )}
             </div>
@@ -396,36 +619,55 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
             </h2>
 
             <div className="space-y-3">
-              {activeThreads.length > 0 ? (
-                activeThreads.map((thread) => (
-                  <button
-                    key={thread.chatId}
-                    onClick={() => openChat(thread)}
-                    className="w-full flex items-center justify-between p-5 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-white hover:border-emerald-600 transition group text-left"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-bold text-slate-900 text-sm">
-                        {thread.lastMessage?.senderId !== user.id
-                          ? thread.lastMessage?.senderName
-                          : 'Patient Session'}
-                      </p>
+              {activeThreads.length >
+              0 ? (
+                activeThreads.map(
+                  (thread) => (
+                    <button
+                      key={thread.chatId}
+                      type="button"
+                      onClick={() =>
+                        openChat(thread)
+                      }
+                      className="w-full flex items-center justify-between p-5 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-white hover:border-emerald-600 transition group text-left"
+                    >
+                      <div className="min-w-0">
 
-                      <p className="text-[9px] text-slate-400 font-medium truncate max-w-[150px]">
-                        {thread.lastMessage?.text ||
-                          'Secure channel open'}
-                      </p>
-                    </div>
+                        <p className="font-bold text-slate-900 text-sm">
+                          {thread
+                            .lastMessage
+                            ?.senderId !==
+                          user.id
+                            ? thread
+                                .lastMessage
+                                ?.senderName
+                            : 'Patient Session'}
+                        </p>
 
-                    <div className="text-right ml-4">
-                      <span className="text-[8px] font-black uppercase text-slate-300 block">
-                        {thread.lastMessage?.time || 'Active'}
-                      </span>
-                    </div>
-                  </button>
-                ))
+                        <p className="text-[9px] text-slate-400 font-medium truncate max-w-[150px]">
+                          {thread
+                            .lastMessage
+                            ?.text ||
+                            'Secure channel open'}
+                        </p>
+
+                      </div>
+
+                      <div className="text-right ml-4">
+                        <span className="text-[8px] font-black uppercase text-slate-300 block">
+                          {thread
+                            .lastMessage
+                            ?.time ||
+                            'Active'}
+                        </span>
+                      </div>
+                    </button>
+                  )
+                )
               ) : (
                 <div className="text-center py-6 text-slate-400 text-xs italic">
-                  No active chat sessions.
+                  No active chat
+                  sessions.
                 </div>
               )}
             </div>
@@ -444,73 +686,95 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
 
               {appointments.filter(
                 (appointment) =>
-                  appointment.status !== 'cancelled'
+                  appointment.status !==
+                  'cancelled'
               ).length > 0 ? (
                 appointments
                   .filter(
                     (appointment) =>
-                      appointment.status !== 'cancelled'
+                      appointment.status !==
+                      'cancelled'
                   )
-                  .map((appointment) => (
-                    <div
-                      key={appointment.id}
-                      className="p-5 bg-white/5 rounded-2xl border border-white/5"
-                    >
-                      <div className="flex items-start justify-between gap-4">
+                  .map(
+                    (appointment) => (
+                      <div
+                        key={appointment.id}
+                        className="p-5 bg-white/5 rounded-2xl border border-white/5"
+                      >
+                        <div className="flex items-start justify-between gap-4">
 
-                        <div>
-                          <p className="font-bold text-white">
-                            {appointment.patientName}
-                          </p>
+                          <div>
+                            <p className="font-bold text-white">
+                              {
+                                appointment.patientName
+                              }
+                            </p>
 
-                          <p className="text-[10px] text-slate-400 mt-1">
-                            {appointment.date}
-                          </p>
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              {
+                                appointment.date
+                              }
+                            </p>
 
-                          <p className="text-[9px] text-emerald-400 mt-1">
-                            {appointment.time}
-                          </p>
+                            <p className="text-[9px] text-emerald-400 mt-1">
+                              {
+                                appointment.time
+                              }
+                            </p>
 
-                          <div className="flex flex-wrap gap-2 mt-3">
+                            <div className="flex flex-wrap gap-2 mt-3">
 
-                            <span className="text-[8px] uppercase font-black px-2 py-1 rounded bg-white/10 text-slate-300">
-                              {appointment.status}
-                            </span>
+                              <span className="text-[8px] uppercase font-black px-2 py-1 rounded bg-white/10 text-slate-300">
+                                {
+                                  appointment.status
+                                }
+                              </span>
 
-                            <span className="text-[8px] uppercase font-black px-2 py-1 rounded bg-white/10 text-slate-300">
-                              Payment:{' '}
-                              {appointment.paymentStatus}
-                            </span>
+                              <span className="text-[8px] uppercase font-black px-2 py-1 rounded bg-white/10 text-slate-300">
+                                Payment:{' '}
+                                {
+                                  appointment.paymentStatus
+                                }
+                              </span>
 
+                            </div>
+
+                            {appointment.notes && (
+                              <p className="text-[9px] text-slate-400 mt-3 max-w-[220px]">
+                                {
+                                  appointment.notes
+                                }
+                              </p>
+                            )}
                           </div>
 
-                          {appointment.notes && (
-                            <p className="text-[9px] text-slate-400 mt-3 max-w-[220px]">
-                              {appointment.notes}
-                            </p>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedPatient(
+                                {
+                                  id: appointment.patientId,
+                                  name: appointment.patientName,
+                                }
+                              );
+
+                              setIsCommOpen(
+                                true
+                              );
+                            }}
+                            className="text-[9px] font-black uppercase text-emerald-400 underline whitespace-nowrap"
+                          >
+                            Open Session
+                          </button>
+
                         </div>
-
-                        <button
-                          onClick={() => {
-                            setSelectedPatient({
-                              id: appointment.patientId,
-                              name: appointment.patientName,
-                            });
-
-                            setIsCommOpen(true);
-                          }}
-                          className="text-[9px] font-black uppercase text-emerald-400 underline whitespace-nowrap"
-                        >
-                          Open Session
-                        </button>
-
                       </div>
-                    </div>
-                  ))
+                    )
+                  )
               ) : (
                 <div className="text-center py-8 text-slate-500 text-xs">
-                  No patient appointments.
+                  No patient
+                  appointments.
                 </div>
               )}
 
@@ -526,7 +790,6 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
         <div className="lg:col-span-7">
 
           {selectedReport ? (
-
             /* ==================================================
                SELECTED REPORT
             ================================================== */
@@ -538,45 +801,61 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
               <div className="flex justify-between items-start border-b border-slate-50 pb-6">
 
                 <div>
+
                   <h3 className="text-2xl font-black text-slate-900">
-                    {selectedReport.patientName}
+                    {
+                      selectedReport.patientName
+                    }
                   </h3>
 
-                  <div className="flex items-center space-x-3 mt-2">
+                  <div className="mt-2">
 
-                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">
-                      Clinical Review Active
-                    </p>
+                    <div className="flex flex-wrap items-center gap-3">
 
-                    <Link
-                      to={`/profile/${selectedReport.patientId}`}
-                      className="text-[8px] font-black uppercase tracking-widest text-emerald-600 hover:underline"
-                    >
-                      Full Medical History
-                    </Link>
+                      <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">
+                        Clinical Review Active
+                      </p>
+
+                      <Link
+                        to={`/profile/${selectedReport.patientId}`}
+                        className="text-[8px] font-black uppercase tracking-widest text-emerald-600 hover:underline"
+                      >
+                        Full Medical History
+                      </Link>
+
+                    </div>
+
+                    <div className="flex flex-wrap gap-3 mt-4">
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenReport(
+                            selectedReport
+                          )
+                        }
+                        className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 transition"
+                      >
+                        View Report
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadReport(
+                            selectedReport
+                          )
+                        }
+                        className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-800 transition"
+                      >
+                        Download Report
+                      </button>
+
+                    </div>
 
                   </div>
-                </div>
 
-                <button
-                  onClick={closeReport}
-                  className="text-slate-300 hover:text-slate-900 transition"
-                  title="Close report"
-                >
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="3"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
+                </div>
 
               </div>
 
@@ -586,29 +865,76 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+
                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
                       Emergency Protocol Contact
                     </p>
 
                     <p className="text-sm font-black text-slate-900">
-                      {patientData.emergencyContactName ||
-                        'N/A'}
+                      {
+                        patientData.emergencyContactName ||
+                        'N/A'
+                      }
                     </p>
+
                   </div>
 
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+
                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
                       Emergency Protocol Phone
                     </p>
 
                     <p className="text-sm font-black text-emerald-600">
-                      {patientData.emergencyContactPhone ||
-                        'N/A'}
+                      {
+                        patientData.emergencyContactPhone ||
+                        'N/A'
+                      }
                     </p>
+
                   </div>
 
                 </div>
               )}
+
+              {/* MEDICAL REPORT FILE */}
+
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between gap-4">
+
+                <div className="min-w-0">
+
+                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                    Medical Report
+                  </p>
+
+                  <p className="text-sm font-bold text-slate-900 truncate">
+                    {
+                      selectedReport.fileName
+                    }
+                  </p>
+
+                  <p className="text-[9px] text-slate-400 mt-1">
+                    Uploaded{' '}
+                    {
+                      selectedReport.uploadDate
+                    }
+                  </p>
+
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleOpenReport(
+                      selectedReport
+                    )
+                  }
+                  className="shrink-0 text-[9px] font-black uppercase tracking-widest text-emerald-600 hover:underline"
+                >
+                  Open File
+                </button>
+
+              </div>
 
               {/* AI INSIGHTS */}
 
@@ -648,8 +974,11 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                 <div className="flex flex-col sm:flex-row gap-4">
 
                   <button
+                    type="button"
                     onClick={() =>
-                      setPrescribingFor(selectedReport)
+                      setPrescribingFor(
+                        selectedReport
+                      )
                     }
                     className="flex-grow bg-emerald-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition"
                   >
@@ -657,6 +986,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                   </button>
 
                   <button
+                    type="button"
                     onClick={async () => {
                       try {
                         await ClinicalAPI.reviewReport(
@@ -665,16 +995,23 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                             status: 'vetted',
                             consultantNote:
                               'Report reviewed and marked clear.',
-                            vettedBy: user.id,
+                            vettedBy:
+                              user.id,
                           }
                         );
 
                         const updatedReports =
-                          await ClinicalAPI.getReports({
-                            status: 'pending_review',
-                          });
+                          await ClinicalAPI.getReports(
+                            {
+                              status:
+                                'pending_review',
+                            }
+                          );
 
-                        setReports(updatedReports);
+                        setReports(
+                          updatedReports
+                        );
+
                         closeReport();
 
                         alert(
@@ -687,7 +1024,8 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                         );
 
                         alert(
-                          error instanceof Error
+                          error instanceof
+                            Error
                             ? error.message
                             : 'Failed to mark report as clear.'
                         );
@@ -699,6 +1037,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
                   </button>
 
                 </div>
+
               </div>
 
             </div>
@@ -730,8 +1069,10 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
               </h3>
 
               <p className="font-medium max-w-sm">
-                Select a report from the vetting queue or
-                an active session to begin clinical review.
+                Select a report from the
+                vetting queue or an active
+                session to begin clinical
+                review.
               </p>
 
             </div>
@@ -739,6 +1080,7 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
           )}
 
         </div>
+
       </div>
 
       {/* ======================================================
@@ -750,7 +1092,9 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
 
           <div
             className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
-            onClick={() => setPrescribingFor(null)}
+            onClick={() =>
+              setPrescribingFor(null)
+            }
           ></div>
 
           <div className="relative w-full max-w-lg bg-white rounded-[3.5rem] p-10 shadow-2xl">
@@ -760,62 +1104,78 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
             </h3>
 
             <form
-              onSubmit={handleIssuePrescription}
+              onSubmit={
+                handleIssuePrescription
+              }
               className="space-y-6"
             >
 
               {/* PATIENT */}
 
               <div>
+
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
                   Patient
                 </label>
 
                 <p className="px-6 py-4 bg-slate-50 rounded-2xl font-bold text-slate-900">
-                  {prescribingFor.patientName}
+                  {
+                    prescribingFor.patientName
+                  }
                 </p>
+
               </div>
 
               {/* MEDICATIONS */}
 
               <div>
+
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
                   Medications
                 </label>
 
                 <textarea
                   required
-                  value={prescriptionData.medications}
+                  value={
+                    prescriptionData.medications
+                  }
                   onChange={(e) =>
                     setPrescriptionData({
                       ...prescriptionData,
-                      medications: e.target.value,
+                      medications:
+                        e.target.value,
                     })
                   }
                   className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-emerald-600 h-24"
                   placeholder="Drug names & strengths..."
                 />
+
               </div>
 
               {/* DOSAGE */}
 
               <div>
+
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
                   Dosage Instructions
                 </label>
 
                 <input
                   required
-                  value={prescriptionData.dosage}
+                  value={
+                    prescriptionData.dosage
+                  }
                   onChange={(e) =>
                     setPrescriptionData({
                       ...prescriptionData,
-                      dosage: e.target.value,
+                      dosage:
+                        e.target.value,
                     })
                   }
                   className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-emerald-600"
                   placeholder="e.g. 1-0-1 for 7 days"
                 />
+
               </div>
 
               {/* SUBMIT */}
@@ -828,7 +1188,9 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
               </button>
 
             </form>
+
           </div>
+
         </div>
       )}
 
@@ -856,3 +1218,4 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({ user }) => {
 };
 
 export default ConsultantDashboard;
+

@@ -42,21 +42,50 @@ async function getProfile(req, res) {
 }
 
 async function updateProfile(req, res) {
-  const user = await User.findByPk(req.params.userId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  try {
+    // Consultants should only be able to edit themselves.
+    // Use the authenticated user's ID from the JWT.
+    const userId =
+      req.user.role === 'ADMIN'
+        ? req.params.userId
+        : req.user.id;
 
-  // Only the user themself or an admin may edit a profile
-  if (req.user.id !== user.id && req.user.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+    const user = await User.findByPk(userId);
 
-  const { password, passwordHash, email, role, id, location, ...rest } = req.body;
-  if (location) {
-    rest.locationLat = location.lat;
-    rest.locationLng = location.lng;
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    const {
+      password,
+      passwordHash,
+      email,
+      role,
+      id,
+      location,
+      ...rest
+    } = req.body;
+
+    // Convert location object into database fields
+    if (location) {
+      rest.locationLat = location.lat;
+      rest.locationLng = location.lng;
+    }
+
+    await user.update(rest);
+
+    return res.json(user.toPublicJSON());
+
+  } catch (error) {
+    console.error('Update profile error:', error);
+
+    return res.status(500).json({
+      error: 'Failed to update profile',
+      message: error.message
+    });
   }
-  await user.update(rest);
-  res.json(user.toPublicJSON());
 }
 
 async function changePassword(req, res) {

@@ -1,3 +1,4 @@
+
 const { MedicalReport, Appointment } = require('../models');
 
 
@@ -10,15 +11,16 @@ async function listReports(req, res) {
 
     const where = {};
 
+    // ===================================================
     // PATIENT
-    // A patient can only see their own reports.
+    // ===================================================
     if (req.user.role === 'PATIENT') {
       where.patientId = req.user.id;
     }
 
+    // ===================================================
     // CONSULTANT
-    // Consultant can only see reports belonging to
-    // patients who have appointments with them.
+    // ===================================================
     else if (req.user.role === 'CONSULTANT') {
 
       const appointments = await Appointment.findAll({
@@ -41,47 +43,68 @@ async function listReports(req, res) {
         return res.json([]);
       }
 
+      // Consultant requested one specific patient
       if (patientId) {
+
         if (!patientIds.includes(patientId)) {
           return res.status(403).json({
-            error: 'You are not authorized to view this patient reports'
+            error:
+              'You are not authorized to view this patient reports'
           });
         }
 
         where.patientId = patientId;
+
       } else {
+
+        // Otherwise return reports belonging
+        // to all consultant patients
         where.patientId = patientIds;
       }
     }
 
+    // ===================================================
     // ADMIN
+    // ===================================================
     else if (req.user.role === 'ADMIN') {
+
       if (patientId) {
         where.patientId = patientId;
       }
     }
 
-    // Other roles
+    // ===================================================
+    // OTHER ROLES
+    // ===================================================
     else {
       return res.status(403).json({
-        error: 'You are not authorized to view medical reports'
+        error:
+          'You are not authorized to view medical reports'
       });
     }
 
-    // Optional status filter
+    // ===================================================
+    // STATUS FILTER
+    // ===================================================
     if (status) {
       where.status = status;
     }
 
     const reports = await MedicalReport.findAll({
       where,
-      order: [['createdAt', 'DESC']]
+      order: [
+        ['createdAt', 'DESC']
+      ]
     });
 
     return res.json(reports);
 
   } catch (error) {
-    console.error('List reports error:', error);
+
+    console.error(
+      'List reports error:',
+      error
+    );
 
     return res.status(500).json({
       error: 'Failed to fetch reports',
@@ -97,9 +120,9 @@ async function listReports(req, res) {
 async function createReport(req, res) {
   try {
 
-    // A patient must create a report for themselves.
     let patientId = req.body.patientId;
 
+    // Patient can only create a report for themselves
     if (req.user.role === 'PATIENT') {
       patientId = req.user.id;
     }
@@ -113,16 +136,167 @@ async function createReport(req, res) {
     const report = await MedicalReport.create({
       ...req.body,
       patientId,
-      status: req.body.status || 'pending_review'
+      status:
+        req.body.status || 'pending_review'
     });
 
     return res.status(201).json(report);
 
   } catch (error) {
-    console.error('Create report error:', error);
+
+    console.error(
+      'Create report error:',
+      error
+    );
 
     return res.status(500).json({
       error: 'Failed to create report',
+      message: error.message
+    });
+  }
+}
+
+
+// =====================================================
+// GET /api/reports/:id/file
+// =====================================================
+// Securely returns the file information for a report.
+//
+// PATIENT:
+//   Can access their own report.
+//
+// CONSULTANT:
+//   Can access the report only if they have an
+//   appointment with the patient.
+//
+// ADMIN:
+//   Can access any report.
+//
+// =====================================================
+async function getReportFile(req, res) {
+  try {
+    const report = await MedicalReport.findByPk(req.params.id);
+
+    if (!report) {
+      return res.status(404).json({
+        error: 'Report not found',
+      });
+    }
+
+    // Consultant/Admin authorization
+    if (
+      req.user.role !== 'CONSULTANT' &&
+      req.user.role !== 'ADMIN'
+    ) {
+      return res.status(403).json({
+        error: 'You are not authorized to access this report',
+      });
+    }
+
+    // Make sure the report actually has a file
+    if (!report.fileUrl) {
+      return res.status(404).json({
+        error: 'No file is attached to this report',
+      });
+    }
+
+    return res.json({
+      id: report.id,
+      patientId: report.patientId,
+      patientName: report.patientName,
+      fileName: report.fileName,
+      fileUrl: report.fileUrl,
+      uploadDate: report.uploadDate,
+      status: report.status,
+    });
+  } catch (error) {
+    console.error('GET REPORT FILE ERROR:', error);
+
+    return res.status(500).json({
+      error: 'Failed to retrieve medical report',
+      message:
+        process.env.NODE_ENV === 'development'
+          ? error.message
+          : undefined,
+    });
+  }
+}
+
+    // ===================================================
+    // PATIENT ACCESS
+    // ===================================================
+    if (req.user.role === 'PATIENT') {
+
+      if (report.patientId !== req.user.id) {
+        return res.status(403).json({
+          error:
+            'You are not authorized to access this report'
+        });
+      }
+    }
+
+    // ===================================================
+    // CONSULTANT ACCESS
+    // ===================================================
+    else if (req.user.role === 'CONSULTANT') {
+
+      const appointment =
+        await Appointment.findOne({
+          where: {
+            consultantId: req.user.id,
+            patientId: report.patientId
+          }
+        });
+
+      if (!appointment) {
+        return res.status(403).json({
+          error:
+            'You are not authorized to access this patient report'
+        });
+      }
+    }
+
+    // ===================================================
+    // ADMIN ACCESS
+    // ===================================================
+    else if (req.user.role !== 'ADMIN') {
+
+      return res.status(403).json({
+        error:
+          'You are not authorized to access medical reports'
+      });
+    }
+
+    // ===================================================
+    // FILE CHECK
+    // ===================================================
+    if (!report.fileUrl) {
+      return res.status(404).json({
+        error:
+          'This report does not have an attached file'
+      });
+    }
+
+    return res.json({
+      id: report.id,
+      patientId: report.patientId,
+      patientName: report.patientName,
+      fileName: report.fileName,
+      fileUrl: report.fileUrl,
+      uploadDate: report.uploadDate,
+      status: report.status
+    });
+
+  } catch (error) {
+
+    console.error(
+      'Get report file error:',
+      error
+    );
+
+    return res.status(500).json({
+      error:
+        'Failed to retrieve medical report',
       message: error.message
     });
   }
@@ -135,9 +309,15 @@ async function createReport(req, res) {
 async function reviewReport(req, res) {
   try {
 
-    const { status, consultantNote } = req.body;
+    const {
+      status,
+      consultantNote
+    } = req.body;
 
-    const report = await MedicalReport.findByPk(req.params.id);
+    const report =
+      await MedicalReport.findByPk(
+        req.params.id
+      );
 
     if (!report) {
       return res.status(404).json({
@@ -145,50 +325,65 @@ async function reviewReport(req, res) {
       });
     }
 
-    // Consultant must have an appointment with this patient.
+    // ===================================================
+    // CONSULTANT AUTHORIZATION
+    // ===================================================
     if (req.user.role === 'CONSULTANT') {
 
-      const appointment = await Appointment.findOne({
-        where: {
-          consultantId: req.user.id,
-          patientId: report.patientId
-        }
-      });
+      const appointment =
+        await Appointment.findOne({
+          where: {
+            consultantId: req.user.id,
+            patientId: report.patientId
+          }
+        });
 
       if (!appointment) {
         return res.status(403).json({
-          error: 'You are not authorized to review this report'
+          error:
+            'You are not authorized to review this report'
         });
       }
     }
 
-    // Only allow valid review statuses
+    // ===================================================
+    // VALID STATUSES
+    // ===================================================
     const allowedStatuses = [
       'pending_review',
       'vetted',
-      'rejected',
-      'clear'
+      'rejected'
     ];
 
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
-        error: 'Invalid report status'
+        error:
+          'Invalid report status'
       });
     }
 
+    // ===================================================
+    // UPDATE REPORT
+    // ===================================================
     await report.update({
       status,
-      consultantNote,
+      consultantNote:
+        consultantNote || null,
       vettedBy: req.user.id
     });
 
     return res.json(report);
 
   } catch (error) {
-    console.error('Review report error:', error);
+
+    console.error(
+      'Review report error:',
+      error
+    );
 
     return res.status(500).json({
-      error: 'Failed to review report',
+      error:
+        'Failed to review report',
       message: error.message
     });
   }
@@ -198,5 +393,7 @@ async function reviewReport(req, res) {
 module.exports = {
   listReports,
   createReport,
+  getReportFile,
   reviewReport
 };
+

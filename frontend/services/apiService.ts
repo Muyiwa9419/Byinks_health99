@@ -166,6 +166,50 @@ export const ClinicalAPI = {
 
     return data;
   },
+  async createReport(
+  report: {
+    patientId: string;
+    patientName: string;
+    fileName: string;
+    fileUrl?: string;
+    uploadDate: string;
+    status?: 'pending_review' | 'vetted' | 'rejected';
+    consultantNote?: string;
+  }
+): Promise<MedicalReport> {
+  return await this.authFetch(
+    '/api/reports',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        patientId: report.patientId,
+        patientName: report.patientName,
+        fileName: report.fileName,
+        fileUrl: report.fileUrl || '',
+        uploadDate: report.uploadDate,
+        status: report.status || 'pending_review',
+        consultantNote: report.consultantNote || ''
+      })
+    }
+  );
+},
+
+
+async getReportFile(reportId: string): Promise<{
+  id: string;
+  patientId: string;
+  patientName: string;
+  fileName: string;
+  fileUrl: string;
+  uploadDate: string;
+  status: string;
+}> {
+  return await this.authFetch(
+    `/api/reports/${reportId}/file`
+  );
+},
+
+
 
   /**
    * -------------------------------------------------------
@@ -1329,6 +1373,20 @@ export const ClinicalAPI = {
       '/api/users'
     );
   },
+
+  async getPatientConsultantAssignments(): Promise<any[]> {
+  return await this.authFetch(
+    '/api/admin/patient-consultants'
+  );
+},
+
+async getConsultantActivity(
+  consultantId: string
+): Promise<any> {
+  return await this.authFetch(
+    `/api/admin/consultants/${consultantId}/activity`
+  );
+},
 
   async getConsultants(): Promise<User[]> {
     const consultants =

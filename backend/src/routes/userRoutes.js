@@ -8,6 +8,7 @@ const {
   adminCreateUser,
   removeUser,
   updateUserStatus,
+  updateOnlineStatus,
   changePassword,
 } = require('../controllers/userController');
 
@@ -15,17 +16,63 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/', requireAuth, requireRole('ADMIN'), getAllUsers);
+router.get(
+  '/',
+  requireAuth,
+  requireRole('ADMIN'),
+  getAllUsers
+);
 
-router.get('/consultants', requireAuth, getConsultants);
+router.get(
+  '/consultants',
+  requireAuth,
+  getConsultants
+);
 
 // IMPORTANT: this must come BEFORE /:userId
-router.patch('/change-password', requireAuth, changePassword);
+router.patch(
+  '/change-password',
+  requireAuth,
+  changePassword
+);
 
-router.get('/:userId', requireAuth, getProfile);
-router.patch('/:userId', requireAuth, updateProfile);
-router.post('/', requireAuth, requireRole('ADMIN'), adminCreateUser);
-router.delete('/:userId', requireAuth, requireRole('ADMIN'), removeUser);
-router.patch('/:userId/status', requireAuth, requireRole('ADMIN'), updateUserStatus);
+router.get(
+  '/:userId',
+  requireAuth,
+  getProfile
+);
+
+router.patch(
+  '/:userId',
+  requireAuth,
+  updateProfile
+);
+
+router.patch(
+  '/:userId/online-status',
+  requireAuth,
+  updateOnlineStatus
+);
+
+router.post(
+  '/',
+  requireAuth,
+  requireRole('ADMIN'),
+  adminCreateUser
+);
+
+router.delete(
+  '/:userId',
+  requireAuth,
+  requireRole('ADMIN'),
+  removeUser
+);
+
+router.patch(
+  '/:userId/status',
+  requireAuth,
+  requireRole('ADMIN'),
+  updateUserStatus
+);
 
 module.exports = router;

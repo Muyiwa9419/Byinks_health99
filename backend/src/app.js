@@ -34,6 +34,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISO
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);

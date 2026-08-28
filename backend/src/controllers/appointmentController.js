@@ -50,6 +50,12 @@ async function listAppointments(req, res) {
 
 async function createAppointment(req, res) {
   try {
+    if (req.user.role !== 'PATIENT') {
+      return res.status(403).json({
+        error: 'Only patients can create appointments'
+      });
+    }
+
     const {
       consultantId,
       date,
@@ -58,12 +64,7 @@ async function createAppointment(req, res) {
       fee
     } = req.body;
 
-    // Validate required fields
-    if (!consultantId || !date || !time) {
-      return res.status(400).json({
-        error: 'Consultant, date, and time are required'
-      });
-    }
+    // ...
 
     // Patient comes from the authenticated user
     const patientId = req.user.id;
@@ -316,46 +317,57 @@ async function getAvailability(req, res) {
 
 async function setAvailability(req, res) {
   try {
-    const { consultantId } = req.params;
     const { blockedSlots } = req.body;
 
-    // Only the consultant themselves or an admin
-    // can modify this consultant's availability.
-    if (
-      req.user.role === 'CONSULTANT' &&
-      req.user.id !== consultantId
-    ) {
-      return res.status(403).json({
-        error: 'You are not authorized to modify this availability'
+    if (!blockedSlots || typeof blockedSlots !== 'object') {
+      return res.status(400).json({
+        error: 'blockedSlots must be an object'
       });
     }
 
-    if (!['CONSULTANT', 'ADMIN'].includes(req.user.role)) {
+    let consultantId;
+
+    // Consultant can only modify their own availability
+    if (req.user.role === 'CONSULTANT') {
+      consultantId = req.user.id;
+    }
+
+    // Admin can modify a consultant's availability
+    else if (req.user.role === 'ADMIN') {
+      consultantId = req.params.consultantId;
+    }
+
+    else {
       return res.status(403).json({
         error: 'You are not authorized to modify availability'
       });
     }
 
-    const [availability] = await ConsultantAvailability.findOrCreate({
-      where: {
-        consultantId
-      },
-      defaults: {
-        blockedSlots: blockedSlots || {}
-      }
-    });
+    const [availability] =
+      await ConsultantAvailability.findOrCreate({
+        where: {
+          consultantId
+        },
+        defaults: {
+          blockedSlots
+        }
+      });
 
-    availability.blockedSlots = blockedSlots || {};
+    availability.blockedSlots = blockedSlots;
 
     await availability.save();
 
-    res.json(availability);
+    return res.json(availability);
 
   } catch (error) {
-    console.error('Set availability error:', error);
+    console.error(
+      'Set availability error:',
+      error
+    );
 
-    res.status(500).json({
-      error: 'Failed to update availability'
+    return res.status(500).json({
+      error: 'Failed to update availability',
+      message: error.message
     });
   }
 }
