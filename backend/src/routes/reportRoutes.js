@@ -15,6 +15,17 @@ const {
 
 const router = express.Router();
 
+
+router.get('/test-route', (req, res) => {
+  console.log('REPORT TEST ROUTE HIT');
+
+  res.json({
+    success: true,
+    message: 'REPORT ROUTES ARE WORKING',
+    version: 'REPORT-ROUTES-TEST-001',
+  });
+});
+
 // List reports
 router.get(
   '/',

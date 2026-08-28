@@ -20,6 +20,11 @@ const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 
+console.log('====================================');
+console.log('BYINKS HEALTH BACKEND VERSION TEST');
+console.log('REPORT ROUTES SHOULD BE ACTIVE');
+console.log('====================================');
+
 const corsOrigins = (process.env.CLIENT_ORIGINS || '')
   .split(',')
   .map((o) => o.trim())
