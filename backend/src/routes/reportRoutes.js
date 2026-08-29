@@ -1,4 +1,3 @@
-
 const express = require('express');
 
 const {
@@ -6,6 +5,7 @@ const {
   createReport,
   getReportFile,
   reviewReport,
+  uploadReport,
 } = require('../controllers/reportController');
 
 const {
@@ -15,17 +15,6 @@ const {
 
 const router = express.Router();
 
-
-router.get('/test-route', (req, res) => {
-  console.log('REPORT TEST ROUTE HIT');
-
-  res.json({
-    success: true,
-    message: 'REPORT ROUTES ARE WORKING',
-    version: 'REPORT-ROUTES-TEST-001',
-  });
-});
-
 // List reports
 router.get(
   '/',
@@ -33,21 +22,28 @@ router.get(
   listReports
 );
 
-// Create/upload report record
+// Upload actual medical report file
+router.post(
+  '/upload',
+  requireAuth,
+  uploadReport
+);
+
+// Create report record
 router.post(
   '/',
   requireAuth,
   createReport
 );
 
-// Get a secure report file URL
+// Get report file
 router.get(
   '/:id/file',
   requireAuth,
   getReportFile
 );
 
-// Review/vet a report
+// Review/vet report
 router.patch(
   '/:id/review',
   requireAuth,
@@ -55,11 +51,4 @@ router.patch(
   reviewReport
 );
 
-router.get('/test-route', (req, res) => {
-  res.json({
-    success: true,
-    message: 'REPORT ROUTES ARE WORKING',
-  });
-});
 module.exports = router;
-

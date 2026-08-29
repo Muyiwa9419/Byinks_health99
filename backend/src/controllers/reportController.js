@@ -1,4 +1,6 @@
 const { MedicalReport, Appointment } = require('../models');
+const cloudinary = require('../config/cloudinary');
+const { Readable } = require('stream');
 
 // =====================================================
 // GET /api/reports
@@ -133,7 +135,122 @@ async function createReport(req, res) {
   }
 }
 
+// =====================================================
+// POST /api/reports/upload
+// =====================================================
 
+async function uploadReport(req, res) {
+  try {
+    if (req.user.role !== 'PATIENT') {
+      return res.status(403).json({
+        error:
+          'Only patients can upload medical reports',
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'Medical report file is required',
+      });
+    }
+
+    const patientId = req.user.id;
+
+    const patientName =
+      req.body.patientName ||
+      req.user.name ||
+      'Patient';
+
+    /*
+     * Upload the actual file to Cloudinary.
+     *
+     * resource_type: 'auto' lets Cloudinary handle
+     * PDFs/images correctly.
+     */
+    const uploadResult = await new Promise(
+      (resolve, reject) => {
+        const stream =
+          cloudinary.uploader.upload_stream(
+            {
+              folder: `byinks-health/medical-reports/${patientId}`,
+
+              resource_type: 'auto',
+
+              use_filename: true,
+
+              unique_filename: true,
+
+              overwrite: false,
+            },
+            (error, result) => {
+              if (error) {
+                return reject(error);
+              }
+
+              resolve(result);
+            }
+          );
+
+        Readable.from(
+          req.file.buffer
+        ).pipe(stream);
+      }
+    );
+
+    if (!uploadResult?.secure_url) {
+      return res.status(500).json({
+        error:
+          'Cloud storage did not return a report URL',
+      });
+    }
+
+    /*
+     * Save the permanent Cloudinary URL
+     * into PostgreSQL.
+     */
+    const report =
+      await MedicalReport.create({
+        patientId,
+
+        patientName,
+
+        fileName:
+          req.file.originalname,
+
+        fileUrl:
+          uploadResult.secure_url,
+
+        uploadDate:
+          new Date().toLocaleDateString(),
+
+        status:
+          'pending_review',
+      });
+
+    console.log(
+      'MEDICAL REPORT UPLOADED:',
+      {
+        id: report.id,
+        patientId: report.patientId,
+        fileName: report.fileName,
+        fileUrl: report.fileUrl,
+      }
+    );
+
+    return res.status(201).json(report);
+  } catch (error) {
+    console.error(
+      'Upload medical report error:',
+      error
+    );
+
+    return res.status(500).json({
+      error:
+        'Failed to upload medical report',
+      message: error.message,
+    });
+  }
+}
 // =====================================================
 // GET /api/reports/:id/file
 // =====================================================
@@ -304,6 +421,7 @@ async function reviewReport(req, res) {
 module.exports = {
   listReports,
   createReport,
+  uploadReport,
   getReportFile,
   reviewReport,
 };

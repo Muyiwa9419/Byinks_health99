@@ -131,69 +131,6 @@ const [loadingAvailability, setLoadingAvailability] =
 
   const timeSlots = ['08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM'];
 
-//   useEffect(() => {
-//   const fetchData = async () => {
-//     try {
-//       // Get consultants from backend
-//       // const consultantsFromDatabase = await ClinicalAPI.getConsultants();
-//       const consultantsFromDatabase: User[] =
-//   await consultantsResponse.json();
-
-//       console.log(
-//         'DATABASE CONSULTANTS:',
-//         consultantsFromDatabase
-//       );
-
-//       setConsultants(consultantsFromDatabase);
-
-//       // Get medical reports
-//       const allReports: MedicalReport[] = JSON.parse(
-//         localStorage.getItem('medi_reports') || '[]'
-//       );
-
-//       setReports(
-//         allReports.filter((r) => r.patientId === user.id)
-//       );
-
-//       // Get prescriptions
-//       const allPrescriptions: Prescription[] = JSON.parse(
-//         localStorage.getItem('medi_prescriptions') || '[]'
-//       );
-
-//       setPrescriptions(
-//         allPrescriptions.filter((p) => p.patientId === user.id)
-//       );
-
-//       // Get deliveries
-//       const allDeliveries: DeliveryOrder[] = JSON.parse(
-//         localStorage.getItem('medi_deliveries') || '[]'
-//       );
-
-//       setDeliveries(
-//         allDeliveries.filter((d) => d.patientId === user.id)
-//       );
-
-//       // Get active chat threads
-//       const threads = await ClinicalAPI.getActiveThreads(user.id);
-//       setActiveThreads(threads);
-
-//     } catch (error) {
-//       console.error(
-//         'Error fetching patient dashboard data:',
-//         error
-//       );
-//     }
-//   };
-
-//   fetchData();
-
-//   window.addEventListener('storage', fetchData);
-
-//   return () => {
-//     window.removeEventListener('storage', fetchData);
-//   };
-// }, [user.id]);
-      
 useEffect(() => {
   const fetchData = async () => {
     try {
@@ -313,29 +250,84 @@ setReports(reportsFromDatabase);
   const handleFileUpload = async (
   e: React.ChangeEvent<HTMLInputElement>
 ) => {
-  if (!e.target.files?.length) return;
+  const input = e.target;
 
-  const file = e.target.files[0];
+  if (!input.files?.length) {
+    return;
+  }
+
+  const file =
+    input.files[0];
+
+  /*
+   * Basic client-side validation.
+   */
+  const allowedTypes = [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ];
+
+  if (
+    !allowedTypes.includes(
+      file.type
+    )
+  ) {
+    alert(
+      'Please upload a PDF, JPG, PNG or WEBP medical report.'
+    );
+
+    input.value = '';
+
+    return;
+  }
+
+  const maxSize =
+    10 * 1024 * 1024;
+
+  if (
+    file.size > maxSize
+  ) {
+    alert(
+      'Medical report must not be larger than 10 MB.'
+    );
+
+    input.value = '';
+
+    return;
+  }
 
   try {
-    const report = await ClinicalAPI.createReport({
-      patientId: user.id,
-      patientName: user.name,
-      fileName: file.name,
-      fileUrl: '',
-      uploadDate: new Date().toLocaleDateString(),
-      status: 'pending_review',
-    });
+    /*
+     * Upload actual file to backend.
+     *
+     * Backend:
+     * - sends it to Cloudinary
+     * - gets permanent URL
+     * - saves URL in PostgreSQL
+     * - returns complete MedicalReport
+     */
+    const report =
+      await ClinicalAPI.uploadMedicalReport(
+        file,
+        user.name
+      );
 
     console.log(
-      'MEDICAL REPORT CREATED:',
+      'MEDICAL REPORT UPLOADED:',
       report
     );
 
-    setReports(prev => [
-      report,
-      ...prev
-    ]);
+    setReports(
+      (prev) => [
+        report,
+        ...prev.filter(
+          (item) =>
+            item.id !== report.id
+        ),
+      ]
+    );
 
     await ClinicalAPI.addNotification(
       user.id,
@@ -346,10 +338,6 @@ setReports(reportsFromDatabase);
     alert(
       'Medical report uploaded successfully and sent for consultant review.'
     );
-
-    // Allow the same file to be selected again later
-    e.target.value = '';
-
   } catch (error) {
     console.error(
       'Medical report upload failed:',
@@ -361,6 +349,11 @@ setReports(reportsFromDatabase);
         ? error.message
         : 'Failed to upload medical report.'
     );
+  } finally {
+    /*
+     * Allow selecting the same file again.
+     */
+    input.value = '';
   }
 };
 
