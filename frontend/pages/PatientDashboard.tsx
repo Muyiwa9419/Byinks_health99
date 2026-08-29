@@ -250,94 +250,38 @@ setReports(reportsFromDatabase);
   const handleFileUpload = async (
   e: React.ChangeEvent<HTMLInputElement>
 ) => {
-  const input = e.target;
+  if (!e.target.files?.length) return;
 
-  if (!input.files?.length) {
-    return;
-  }
-
-  const file =
-    input.files[0];
-
-  /*
-   * Basic client-side validation.
-   */
-  const allowedTypes = [
-    'application/pdf',
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-  ];
-
-  if (
-    !allowedTypes.includes(
-      file.type
-    )
-  ) {
-    alert(
-      'Please upload a PDF, JPG, PNG or WEBP medical report.'
-    );
-
-    input.value = '';
-
-    return;
-  }
-
-  const maxSize =
-    10 * 1024 * 1024;
-
-  if (
-    file.size > maxSize
-  ) {
-    alert(
-      'Medical report must not be larger than 10 MB.'
-    );
-
-    input.value = '';
-
-    return;
-  }
+  const file = e.target.files[0];
 
   try {
-    /*
-     * Upload actual file to backend.
-     *
-     * Backend:
-     * - sends it to Cloudinary
-     * - gets permanent URL
-     * - saves URL in PostgreSQL
-     * - returns complete MedicalReport
-     */
-    const report =
-      await ClinicalAPI.uploadMedicalReport(
-        file,
-        user.name
-      );
+    console.log('Uploading report:', file.name);
+
+    const report = await ClinicalAPI.uploadReport(file);
 
     console.log(
       'MEDICAL REPORT UPLOADED:',
       report
     );
 
-    setReports(
-      (prev) => [
-        report,
-        ...prev.filter(
-          (item) =>
-            item.id !== report.id
-        ),
-      ]
-    );
+    setReports(prev => [
+      report,
+      ...prev
+    ]);
 
     await ClinicalAPI.addNotification(
       user.id,
       'Report Uploaded',
-      'Your report is now in the vetting queue.'
+      'Your report has been uploaded successfully and sent for consultant review.'
     );
 
     alert(
       'Medical report uploaded successfully and sent for consultant review.'
     );
+
+    // Allow the same file to be selected again later
+    e.target.value = '';
+
   } catch (error) {
     console.error(
       'Medical report upload failed:',
@@ -349,11 +293,6 @@ setReports(reportsFromDatabase);
         ? error.message
         : 'Failed to upload medical report.'
     );
-  } finally {
-    /*
-     * Allow selecting the same file again.
-     */
-    input.value = '';
   }
 };
 

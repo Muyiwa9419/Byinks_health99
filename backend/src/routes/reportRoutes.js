@@ -44,6 +44,7 @@ router.get(
 router.post(
   '/upload',
   requireAuth,
+  upload.single('file'),
   uploadReport
 );
 

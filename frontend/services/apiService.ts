@@ -253,6 +253,47 @@ async uploadMedicalReport(
   return data;
 },
 
+
+async uploadReport(file: File): Promise<MedicalReport> {
+  const token = localStorage.getItem('medi_auth_token');
+
+  if (!token) {
+    throw new Error(
+      'Authentication token not found. Please log in again.'
+    );
+  }
+
+  const formData = new FormData();
+
+  formData.append('file', file);
+
+  const response = await fetch(
+    `${API_URL}/api/reports/upload`,
+    {
+      method: 'POST',
+
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+
+      body: formData,
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data.error ||
+      data.message ||
+      `Upload failed: ${response.status}`
+    );
+  }
+
+  return data;
+},
+
+
 async getReportFile(reportId: string): Promise<{
   id: string;
   patientId: string;
