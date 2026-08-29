@@ -1,11 +1,12 @@
 const express = require('express');
+const multer = require('multer');
 
 const {
   listReports,
   createReport,
+  uploadReport,
   getReportFile,
   reviewReport,
-  uploadReport,
 } = require('../controllers/reportController');
 
 const {
@@ -14,6 +15,23 @@ const {
 } = require('../middleware/auth');
 
 const router = express.Router();
+
+
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+});
+
+
+router.get('/upload-test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'New report routes deployed',
+  });
+});
 
 // List reports
 router.get(
