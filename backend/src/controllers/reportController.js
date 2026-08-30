@@ -139,152 +139,8 @@ async function createReport(req, res) {
 // POST /api/reports/upload
 // =====================================================
 
-// async function uploadReport(req, res) {
-//   try {
-//     if (req.user.role !== 'PATIENT') {
-//       return res.status(403).json({
-//         error:
-//           'Only patients can upload medical reports',
-//       });
-//     }
-
-//     if (!req.file) {
-//       return res.status(400).json({
-//         error: 'Medical report file is required',
-//       });
-//     }
-
-//     const patientId = req.user.id;
-
-//     const patientName =
-//       req.body.patientName ||
-//       req.user.name ||
-//       'Patient';
-
-//     /*
-//      * Upload the actual file to Cloudinary.
-//      *
-//      * resource_type: 'auto' lets Cloudinary handle
-//      * PDFs/images correctly.
-//      */
-//     const uploadResult = await new Promise(
-//       (resolve, reject) => {
-//         const stream =
-//           cloudinary.uploader.upload_stream(
-//             {
-//               folder: `byinks-health/medical-reports/${patientId}`,
-
-//               resource_type: 'auto',
-
-//               use_filename: true,
-
-//               unique_filename: true,
-
-//               overwrite: false,
-//             },
-//             (error, result) => {
-//               if (error) {
-//                 return reject(error);
-//               }
-
-//               resolve(result);
-//             }
-//           );
-
-//         Readable.from(
-//           req.file.buffer
-//         ).pipe(stream);
-//       }
-//     );
-
-//     if (!uploadResult?.secure_url) {
-//       return res.status(500).json({
-//         error:
-//           'Cloud storage did not return a report URL',
-//       });
-//     }
-
-//     /*
-//      * Save the permanent Cloudinary URL
-//      * into PostgreSQL.
-//      */
-//     const report =
-//       await MedicalReport.create({
-//         patientId,
-
-//         patientName,
-
-//         fileName:
-//           req.file.originalname,
-
-//         fileUrl:
-//           uploadResult.secure_url,
-
-//         uploadDate:
-//           new Date().toLocaleDateString(),
-
-//         status:
-//           'pending_review',
-//       });
-
-//     console.log(
-//       'MEDICAL REPORT UPLOADED:',
-//       {
-//         id: report.id,
-//         patientId: report.patientId,
-//         fileName: report.fileName,
-//         fileUrl: report.fileUrl,
-//       }
-//     );
-
-//     return res.status(201).json(report);
-//   } catch (error) {
-//     console.error(
-//       'Upload medical report error:',
-//       error
-//     );
-
-//     return res.status(500).json({
-//       error:
-//         'Failed to upload medical report',
-//       message: error.message,
-//     });
-//   }
-// }
-
 async function uploadReport(req, res) {
   try {
-    console.log('=================================');
-    console.log('MEDICAL REPORT UPLOAD STARTED');
-    console.log('=================================');
-
-    console.log('User:', req.user?.id);
-    console.log('Role:', req.user?.role);
-
-    console.log('File received:', {
-      exists: !!req.file,
-      originalname: req.file?.originalname,
-      mimetype: req.file?.mimetype,
-      size: req.file?.size,
-    });
-
-    console.log('Cloudinary config:', {
-      cloud_name:
-        process.env.CLOUDINARY_CLOUD_NAME
-          ? 'PRESENT'
-          : 'MISSING',
-
-      api_key:
-        process.env.CLOUDINARY_API_KEY
-          ? 'PRESENT'
-          : 'MISSING',
-
-      api_secret:
-        process.env.CLOUDINARY_API_SECRET
-          ? 'PRESENT'
-          : 'MISSING',
-    });
-
     if (req.user.role !== 'PATIENT') {
       return res.status(403).json({
         error:
@@ -294,8 +150,7 @@ async function uploadReport(req, res) {
 
     if (!req.file) {
       return res.status(400).json({
-        error:
-          'Medical report file is required',
+        error: 'Medical report file is required',
       });
     }
 
@@ -306,87 +161,53 @@ async function uploadReport(req, res) {
       req.user.name ||
       'Patient';
 
-    console.log(
-      'Starting Cloudinary upload...'
-    );
+    /*
+     * Upload the actual file to Cloudinary.
+     *
+     * resource_type: 'auto' lets Cloudinary handle
+     * PDFs/images correctly.
+     */
+    const uploadResult = await new Promise(
+      (resolve, reject) => {
+        const stream =
+          cloudinary.uploader.upload_stream(
+            {
+              folder: `byinks-health/medical-reports/${patientId}`,
 
-    const uploadResult =
-      await new Promise(
-        (resolve, reject) => {
+              resource_type: 'auto',
 
-          const stream =
-            cloudinary.uploader.upload_stream(
-              {
-                folder:
-                  `byinks-health/medical-reports/${patientId}`,
+              use_filename: true,
 
-                resource_type: 'auto',
+              unique_filename: true,
 
-                use_filename: true,
-
-                unique_filename: true,
-
-                overwrite: false,
-              },
-
-              (error, result) => {
-
-                if (error) {
-                  console.error(
-                    'CLOUDINARY ERROR:',
-                    error
-                  );
-
-                  return reject(error);
-                }
-
-                console.log(
-                  'CLOUDINARY SUCCESS:',
-                  {
-                    public_id:
-                      result?.public_id,
-
-                    secure_url:
-                      result?.secure_url,
-
-                    resource_type:
-                      result?.resource_type,
-                  }
-                );
-
-                resolve(result);
+              overwrite: false,
+            },
+            (error, result) => {
+              if (error) {
+                return reject(error);
               }
-            );
 
-          stream.on(
-            'error',
-            (error) => {
-              console.error(
-                'CLOUDINARY STREAM ERROR:',
-                error
-              );
-
-              reject(error);
+              resolve(result);
             }
           );
 
-          Readable
-            .from(req.file.buffer)
-            .pipe(stream);
-        }
-      );
+        Readable.from(
+          req.file.buffer
+        ).pipe(stream);
+      }
+    );
 
     if (!uploadResult?.secure_url) {
       return res.status(500).json({
         error:
-          'Cloudinary did not return a secure URL',
+          'Cloud storage did not return a report URL',
       });
     }
 
-    console.log(
-      'Saving report to PostgreSQL...'
-    );
-
+    /*
+     * Save the permanent Cloudinary URL
+     * into PostgreSQL.
+     */
     const report =
       await MedicalReport.create({
         patientId,
@@ -407,40 +228,26 @@ async function uploadReport(req, res) {
       });
 
     console.log(
-      'MEDICAL REPORT SAVED:',
+      'MEDICAL REPORT UPLOADED:',
       {
         id: report.id,
+        patientId: report.patientId,
         fileName: report.fileName,
         fileUrl: report.fileUrl,
       }
     );
 
     return res.status(201).json(report);
-
   } catch (error) {
-
     console.error(
-      '================================='
-    );
-
-    console.error(
-      'UPLOAD MEDICAL REPORT ERROR'
-    );
-
-    console.error(
+      'Upload medical report error:',
       error
-    );
-
-    console.error(
-      '================================='
     );
 
     return res.status(500).json({
       error:
         'Failed to upload medical report',
-
-      message:
-        error.message,
+      message: error.message,
     });
   }
 }
@@ -614,7 +421,6 @@ async function reviewReport(req, res) {
 module.exports = {
   listReports,
   createReport,
-  uploadReport,
   getReportFile,
   reviewReport,
 };

@@ -30,44 +30,121 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [isOnboardOpen, setIsOnboardOpen] = useState(false);
 
-  // Onboarding Form State
-  setOnboardForm({
+ // Onboarding Form State
+const [onboardForm, setOnboardForm] = useState({
   name: '',
   email: '',
   password: '',
   role: UserRole.CONSULTANT,
-  specialty: ''
+  specialty: '',
 });
 
   const fetchData = async () => {
+  try {
     setLoading(true);
-    const users = await ClinicalAPI.getAllUsers();
-    const syncs = await ClinicalAPI.getSyncRequests();
-    
-    const totalPatients = users.filter(u => u.role === UserRole.PATIENT).length;
-    const activeConsultants = users.filter(u => (u.role === UserRole.CONSULTANT || u.role === UserRole.PHARMACY || u.role === UserRole.DISPATCH) && u.isApproved).length;
-    
-    const appointments =
-  await ClinicalAPI.getAppointments();
-    const storedTrans: Transaction[] = JSON.parse(localStorage.getItem('medi_transactions') || '[]');
-    const storedLogs: AuditLog[] = JSON.parse(localStorage.getItem('medi_audit_logs') || '[]');
 
-    const appsToday = storedApps.filter(a => a.date === new Date().toISOString().split('T')[0]).length;
-    const totalRevenue = storedTrans.reduce((acc, curr) => acc + curr.amount, 0);
+    const users = await ClinicalAPI.getAllUsers();
+
+    const syncs =
+      await ClinicalAPI.getSyncRequests();
+
+    const appointments =
+      await ClinicalAPI.getAppointments();
+
+    const storedTrans: Transaction[] =
+      JSON.parse(
+        localStorage.getItem(
+          'medi_transactions'
+        ) || '[]'
+      );
+
+    const storedLogs: AuditLog[] =
+      JSON.parse(
+        localStorage.getItem(
+          'medi_audit_logs'
+        ) || '[]'
+      );
+
+    const activeConsultants =
+      users.filter(
+        u =>
+          (
+            u.role === UserRole.CONSULTANT ||
+            u.role === UserRole.PHARMACY ||
+            u.role === UserRole.DISPATCH
+          ) &&
+          u.isApproved
+      ).length;
+
+    const today =
+      new Date()
+        .toISOString()
+        .split('T')[0];
+
+    const appsToday =
+      appointments.filter(
+        a => a.date === today
+      ).length;
+
+    const totalRevenue =
+      storedTrans.reduce(
+        (acc, curr) =>
+          acc + Number(curr.amount || 0),
+        0
+      );
 
     setLiveStats([
-      { label: 'Total Identities', value: users.length.toString(), trend: 'Global', color: 'blue' },
-      { label: 'Verified Staff', value: activeConsultants.toLocaleString(), trend: 'Verified', color: 'purple' },
-      { label: 'Appointments Today', value: appsToday.toLocaleString(), trend: 'Live', color: 'green' },
-      { label: 'Total Revenue', value: `$${totalRevenue.toLocaleString()}`, trend: 'Gross', color: 'indigo' },
+      {
+        label: 'Total Identities',
+        value: users.length.toString(),
+        trend: 'Global',
+        color: 'blue',
+      },
+      {
+        label: 'Verified Staff',
+        value:
+          activeConsultants.toLocaleString(),
+        trend: 'Verified',
+        color: 'purple',
+      },
+      {
+        label: 'Appointments Today',
+        value:
+          appsToday.toLocaleString(),
+        trend: 'Live',
+        color: 'green',
+      },
+      {
+        label: 'Total Revenue',
+        value:
+          `$${totalRevenue.toLocaleString()}`,
+        trend: 'Gross',
+        color: 'indigo',
+      },
     ]);
 
     setAllUsers(users);
     setSyncRequests(syncs);
     setAuditLogs(storedLogs);
-    setLoading(false);
-  };
 
+  } catch (error) {
+
+    console.error(
+      'ADMIN DASHBOARD LOAD ERROR:',
+      error
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Failed to load admin dashboard'
+    );
+
+  } finally {
+
+    setLoading(false);
+  }
+};
   useEffect(() => {
     fetchData();
     window.addEventListener('storage', fetchData);
