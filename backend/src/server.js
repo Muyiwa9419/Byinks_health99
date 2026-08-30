@@ -4,7 +4,7 @@ const { sequelize } = require('./models');
 const { initSockets } = require('./sockets');
 const adminRoutes = require('./routes/adminRoutes');
 const PORT = process.env.PORT || 5000;
-
+app.set('io', io);
 async function start() {
   try {
     await sequelize.authenticate();
