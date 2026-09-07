@@ -1,3 +1,4 @@
+
 const { DeliveryOrder } = require('../models');
 const { Op } = require('sequelize');
 const { getIO } = require('../sockets');
@@ -590,6 +591,188 @@ async function updateDeliveryStatus(
 
 /**
  * ---------------------------------------------------------
+ * PATIENT CONFIRMS DELIVERY
+ * ---------------------------------------------------------
+ *
+ * PATCH /api/deliveries/:id/confirm
+ *
+ * This endpoint is used by the patient after receiving
+ * the medication.
+ *
+ * The delivery must already be marked as "delivered".
+ */
+async function confirmDelivery(
+  req,
+  res
+) {
+  try {
+    /**
+     * Find delivery.
+     */
+
+    const delivery =
+      await DeliveryOrder.findByPk(
+        req.params.id
+      );
+
+    if (!delivery) {
+      return res.status(404).json({
+        error:
+          'Delivery not found',
+      });
+    }
+
+    /**
+     * Make sure the logged-in patient owns
+     * this delivery.
+     */
+
+    if (
+      req.user &&
+      req.user.role === 'PATIENT' &&
+      delivery.patientId !== req.user.id
+    ) {
+      return res.status(403).json({
+        error:
+          'You are not authorized to confirm this delivery',
+      });
+    }
+
+    /**
+     * Delivery must have reached the delivered
+     * state before the patient can confirm receipt.
+     */
+
+    if (
+      delivery.status !==
+      'delivered'
+    ) {
+      return res.status(400).json({
+        error:
+          'Delivery must be marked as delivered before confirmation',
+        currentStatus:
+          delivery.status,
+      });
+    }
+
+    /**
+     * If the model already supports a confirmation
+     * field, update it.
+     *
+     * Otherwise, the delivery remains in the
+     * delivered state and the confirmation is
+     * communicated through Socket.IO.
+     */
+
+    const updateFields = {};
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        delivery.dataValues,
+        'patientConfirmed'
+      )
+    ) {
+      updateFields.patientConfirmed = true;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        delivery.dataValues,
+        'confirmedAt'
+      )
+    ) {
+      updateFields.confirmedAt =
+        new Date().toISOString();
+    }
+
+    if (
+      Object.keys(updateFields).length > 0
+    ) {
+      await delivery.update(
+        updateFields
+      );
+    }
+
+    const publicDelivery =
+      delivery.toPublicJSON();
+
+    /**
+     * -----------------------------------------------------
+     * SOCKET BROADCAST
+     * -----------------------------------------------------
+     */
+
+    const io = getIO();
+
+    if (io) {
+      /**
+       * Notify the patient.
+       */
+      io.to(
+        `patient:${delivery.patientId}`
+      ).emit(
+        'delivery:confirmed',
+        publicDelivery
+      );
+
+      /**
+       * Notify pharmacy.
+       */
+      io.to(
+        `pharmacy:${delivery.pharmacyId}`
+      ).emit(
+        'delivery:confirmed',
+        publicDelivery
+      );
+
+      /**
+       * Notify dispatch rider.
+       */
+      if (
+        delivery.dispatchId
+      ) {
+        io.to(
+          `dispatch:${delivery.dispatchId}`
+        ).emit(
+          'delivery:confirmed',
+          publicDelivery
+        );
+      }
+
+      /**
+       * Notify anyone watching the delivery.
+       */
+      io.to(
+        `delivery:${delivery.id}`
+      ).emit(
+        'delivery:confirmed',
+        publicDelivery
+      );
+    }
+
+    res.json({
+      success: true,
+      message:
+        'Delivery receipt confirmed successfully',
+      delivery:
+        publicDelivery,
+    });
+  } catch (error) {
+    console.error(
+      'Confirm delivery error:',
+      error
+    );
+
+    res.status(500).json({
+      error:
+        'Failed to confirm delivery',
+      message: error.message,
+    });
+  }
+}
+
+/**
+ * ---------------------------------------------------------
  * UPDATE DELIVERY LOCATION
  * ---------------------------------------------------------
  *
@@ -745,5 +928,6 @@ module.exports = {
   createDelivery,
   assignDispatch,
   updateDeliveryStatus,
+  confirmDelivery,
   updateLocation,
 };

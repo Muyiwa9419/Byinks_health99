@@ -3,23 +3,37 @@ const { app, corsOrigins } = require('./app');
 const { sequelize } = require('./models');
 const { initSockets } = require('./sockets');
 const adminRoutes = require('./routes/adminRoutes');
+
 const PORT = process.env.PORT || 5000;
-app.set('io', io);
+
 async function start() {
   try {
+    // Connect to database
     await sequelize.authenticate();
     console.log('[db] Connection established');
 
-    // In production, prefer real migrations. For this project's scale,
-    // sync({ alter: true }) keeps tables in step with the models automatically.
-    await sequelize.sync({ alter: process.env.NODE_ENV !== 'production' });
+    // In development, keep models synchronized automatically.
+    // In production, use proper migrations.
+    await sequelize.sync({
+      alter: process.env.NODE_ENV !== 'production',
+    });
+
     console.log('[db] Models synced');
 
+    // Create HTTP server
     const server = http.createServer(app);
-    initSockets(server, corsOrigins.length ? corsOrigins : '*');
 
+    // Initialize Socket.IO
+    initSockets(
+      server,
+      corsOrigins.length ? corsOrigins : '*'
+    );
+
+    // Start server
     server.listen(PORT, () => {
-      console.log(`[server] Byinks Health API listening on port ${PORT}`);
+      console.log(
+        `[server] Byinks Health API listening on port ${PORT}`
+      );
     });
   } catch (err) {
     console.error('[server] Failed to start:', err);

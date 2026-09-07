@@ -421,6 +421,7 @@ async function reviewReport(req, res) {
 module.exports = {
   listReports,
   createReport,
+  uploadReport,
   getReportFile,
   reviewReport,
 };
