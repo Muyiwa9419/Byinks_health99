@@ -194,6 +194,98 @@ export const ClinicalAPI = {
   );
 },
 
+
+async getDispatchers(): Promise<User[]> {
+  return await this.authFetch('/api/users/dispatchers');
+},
+
+async getPrescriptions(filters?: {
+  patientId?: string;
+  consultantId?: string;
+  pharmacyId?: string;
+  status?: string;
+}): Promise<Prescription[]> {
+  const params = new URLSearchParams();
+
+  if (filters?.patientId) {
+    params.set('patientId', filters.patientId);
+  }
+
+  if (filters?.consultantId) {
+    params.set('consultantId', filters.consultantId);
+  }
+
+  if (filters?.pharmacyId) {
+    params.set('pharmacyId', filters.pharmacyId);
+  }
+
+  if (filters?.status) {
+    params.set('status', filters.status);
+  }
+
+  const query = params.toString();
+
+  return await this.authFetch(
+    `/api/prescriptions${query ? `?${query}` : ''}`
+  );
+},
+
+async updatePrescriptionStatus(
+  prescriptionId: string,
+  data: {
+    status?: string;
+    pharmacyId?: string;
+    patientAddress?: string;
+  }
+): Promise<Prescription> {
+  return await this.authFetch(
+    `/api/prescriptions/${prescriptionId}/status`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }
+  );
+},
+
+async createDelivery(data: {
+  prescriptionId: string;
+  patientId: string;
+  patientName: string;
+  medications: string;
+  dosage: string;
+  pharmacyId: string;
+  dispatchId?: string;
+  patientAddress: string;
+  patientLocation?: {
+    lat: number;
+    lng: number;
+  };
+}): Promise<DeliveryOrder> {
+  return await this.authFetch(
+    '/api/deliveries',
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  );
+},
+
+async assignDelivery(
+  deliveryId: string,
+  dispatchId: string
+): Promise<DeliveryOrder> {
+  return await this.authFetch(
+    `/api/deliveries/${deliveryId}/assign`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        dispatchId,
+      }),
+    }
+  );
+},
+
+
 async uploadMedicalReport(
   file: File,
   patientName: string

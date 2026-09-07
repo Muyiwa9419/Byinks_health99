@@ -128,8 +128,8 @@ async function createPrescription(req, res) {
        * waiting state.
        */
       status:
-        req.body.status ||
-        'pending_pharmacy',
+  req.body.status ||
+  'sent_to_pharmacy',
     };
 
     const prescription =

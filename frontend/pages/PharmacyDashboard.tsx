@@ -25,19 +25,22 @@ const PharmacyDashboard: React.FC<{ user: User }> = ({ user }) => {
    * PostgreSQL user record, not necessarily localStorage.
    */
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        /*
-         * ---------------------------------------------------
-         * PRESCRIPTIONS
-         * ---------------------------------------------------
-         */
+  let mounted = true;
 
-        const allP: Prescription[] = JSON.parse(
-          localStorage.getItem('medi_prescriptions') || '[]'
-        );
+  const fetchData = async () => {
+    try {
+      /*
+       * -------------------------------------------------------
+       * LOAD PRESCRIPTIONS FROM POSTGRESQL
+       * -------------------------------------------------------
+       */
+      const allPrescriptions =
+        await ClinicalAPI.getPrescriptions({
+          pharmacyId: user.id,
+        });
 
-        const filtered = allP.filter((p) =>
+      const pharmacyPrescriptions =
+        allPrescriptions.filter((p) =>
           [
             'sent_to_pharmacy',
             'preparing',
@@ -45,58 +48,57 @@ const PharmacyDashboard: React.FC<{ user: User }> = ({ user }) => {
           ].includes(p.status)
         );
 
-        setPrescriptions(filtered);
+      /*
+       * -------------------------------------------------------
+       * LOAD VERIFIED DISPATCHERS FROM POSTGRESQL
+       * -------------------------------------------------------
+       */
+      const verifiedDispatchers =
+        await ClinicalAPI.getDispatchers();
 
-        /*
-         * ---------------------------------------------------
-         * VERIFIED DISPATCH USERS
-         * ---------------------------------------------------
-         *
-         * IMPORTANT:
-         * Get users from PostgreSQL instead of localStorage.
-         */
+      if (!mounted) return;
 
-        const allUsers = await ClinicalAPI.getAllUsers();
-
-        console.log(
-          'PHARMACY - ALL USERS FROM DATABASE:',
-          allUsers
-        );
-
-        const verifiedDispatchers = allUsers.filter(
-          (u) =>
-            u.role === UserRole.DISPATCH &&
-            u.isApproved === true
-        );
-
-        console.log(
-          'PHARMACY - VERIFIED DISPATCHERS:',
-          verifiedDispatchers
-        );
-
-        setDispatchers(verifiedDispatchers);
-      } catch (error) {
-        console.error(
-          'PHARMACY DASHBOARD LOAD ERROR:',
-          error
-        );
-      }
-    };
-
-    fetchData();
-
-    window.addEventListener(
-      'storage',
-      fetchData
-    );
-
-    return () => {
-      window.removeEventListener(
-        'storage',
-        fetchData
+      console.log(
+        'PHARMACY - DATABASE PRESCRIPTIONS:',
+        allPrescriptions
       );
-    };
-  }, []);
+
+      console.log(
+        'PHARMACY - VERIFIED DISPATCHERS:',
+        verifiedDispatchers
+      );
+
+      setPrescriptions(
+        pharmacyPrescriptions
+      );
+
+      setDispatchers(
+        verifiedDispatchers
+      );
+    } catch (error) {
+      console.error(
+        'PHARMACY DASHBOARD LOAD ERROR:',
+        error
+      );
+    }
+  };
+
+  fetchData();
+
+  /*
+   * Refresh every 10 seconds so newly verified
+   * dispatch riders appear without requiring logout.
+   */
+  const timer = window.setInterval(
+    fetchData,
+    10000
+  );
+
+  return () => {
+    mounted = false;
+    window.clearInterval(timer);
+  };
+}, [user.id]);
 
   /*
    * ---------------------------------------------------------
@@ -104,73 +106,76 @@ const PharmacyDashboard: React.FC<{ user: User }> = ({ user }) => {
    * ---------------------------------------------------------
    */
 
-  const handleUpdateStatus = (
-    id: string,
-    status: Prescription['status']
-  ) => {
-    try {
-      const allP: Prescription[] = JSON.parse(
-        localStorage.getItem(
-          'medi_prescriptions'
-        ) || '[]'
-      );
-
-      const idx = allP.findIndex(
+  const handleUpdateStatus = async (
+  id: string,
+  status: Prescription['status']
+) => {
+  try {
+    const prescription =
+      prescriptions.find(
         (p) => p.id === id
       );
 
-      if (idx === -1) {
-        alert(
-          'Prescription could not be found.'
-        );
-        return;
-      }
+    if (!prescription) {
+      alert(
+        'Prescription could not be found.'
+      );
+      return;
+    }
 
-      allP[idx].status = status;
-      allP[idx].pharmacyId = user.id;
-
-      ClinicalAPI.savePrescriptions(allP);
-
-      const msg =
-        status === 'preparing'
-          ? 'Pharmacy has started preparing your medication.'
-          : status === 'ready_for_dispatch'
-          ? 'Your medication is ready and awaiting logistics pickup.'
-          : `Prescription status updated to ${(status as string).replace(
-              '_',
-              ' '
-            )}.`;
-
-      ClinicalAPI.addNotification(
-        allP[idx].patientId,
-        'Pharmacy Update',
-        msg
+    const updated =
+      await ClinicalAPI.updatePrescriptionStatus(
+        id,
+        {
+          status,
+          pharmacyId: user.id,
+        }
       );
 
-      /*
-       * Update screen immediately.
-       */
-
-      setPrescriptions(
-        allP.filter((p) =>
+    /*
+     * Update the UI immediately.
+     */
+    setPrescriptions((current) =>
+      current
+        .map((p) =>
+          p.id === updated.id
+            ? updated
+            : p
+        )
+        .filter((p) =>
           [
             'sent_to_pharmacy',
             'preparing',
             'ready_for_dispatch',
           ].includes(p.status)
         )
-      );
-    } catch (error) {
-      console.error(
-        'Failed to update prescription:',
-        error
-      );
+    );
 
-      alert(
-        'Failed to update prescription status.'
-      );
-    }
-  };
+    await ClinicalAPI.addNotification(
+      prescription.patientId,
+      'Pharmacy Update',
+      status === 'preparing'
+        ? 'Pharmacy has started preparing your medication.'
+        : status === 'ready_for_dispatch'
+        ? 'Your medication is ready and awaiting logistics pickup.'
+        : `Prescription status updated to ${status.replace(
+            '_',
+            ' '
+          )}.`
+    );
+  } catch (error) {
+    console.error(
+      'Failed to update prescription:',
+      error
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Failed to update prescription status.'
+    );
+  }
+};
 
   /*
    * ---------------------------------------------------------
@@ -324,194 +329,146 @@ const PharmacyDashboard: React.FC<{ user: User }> = ({ user }) => {
    */
 
   const assignDispatch = async (
-    prescription: Prescription,
-    dispatcherId: string
-  ) => {
-    if (!dispatcherId) {
+  prescription: Prescription,
+  dispatcherId: string
+) => {
+  if (!dispatcherId) return;
+
+  try {
+    /*
+     * Find the verified dispatcher we loaded
+     * from PostgreSQL.
+     */
+    const dispatcher =
+      dispatchers.find(
+        (d) => d.id === dispatcherId
+      );
+
+    if (!dispatcher) {
+      alert(
+        'The selected dispatch partner is no longer verified.'
+      );
       return;
     }
 
-    try {
-      /*
-       * Get current users from backend.
-       */
-
-      const allUsers =
-        await ClinicalAPI.getAllUsers();
-
-      const dispatcher =
-        allUsers.find(
-          (u) =>
-            u.id === dispatcherId &&
-            u.role === UserRole.DISPATCH &&
-            u.isApproved === true
-        );
-
-      if (!dispatcher) {
-        alert(
-          'The selected dispatch partner is no longer available or has not been verified.'
-        );
-        return;
-      }
-
-      /*
-       * Get patient information.
-       */
-
-      const patient =
-        allUsers.find(
-          (u) =>
-            u.id ===
-            prescription.patientId
-        );
-
-      /*
-       * Mark prescription as dispatched.
-       */
-
-      const allP: Prescription[] =
-        JSON.parse(
-          localStorage.getItem(
-            'medi_prescriptions'
-          ) || '[]'
-        );
-
-      const prescriptionIndex =
-        allP.findIndex(
-          (p) =>
-            p.id ===
-            prescription.id
-        );
-
-      if (
-        prescriptionIndex === -1
-      ) {
-        alert(
-          'Prescription could not be found.'
-        );
-        return;
-      }
-
-      allP[
-        prescriptionIndex
-      ].status = 'dispatched';
-
-      allP[
-        prescriptionIndex
-      ].pharmacyId = user.id;
-
-      ClinicalAPI.savePrescriptions(
-        allP
+    /*
+     * -------------------------------------------------------
+     * GET PATIENT PROFILE
+     * -------------------------------------------------------
+     */
+    const patient =
+      await ClinicalAPI.getProfile(
+        prescription.patientId
       );
 
-      /*
-       * -----------------------------------------------------
-       * CREATE DELIVERY ORDER
-       * -----------------------------------------------------
-       */
+    /*
+     * -------------------------------------------------------
+     * CREATE REAL DELIVERY ORDER
+     * -------------------------------------------------------
+     *
+     * This is stored in PostgreSQL.
+     */
+    const delivery =
+      await ClinicalAPI.createDelivery({
+        prescriptionId:
+          prescription.id,
 
-      const newDelivery: DeliveryOrder =
+        patientId:
+          prescription.patientId,
+
+        patientName:
+          prescription.patientName,
+
+        medications:
+          prescription.medications,
+
+        dosage:
+          prescription.dosage,
+
+        pharmacyId:
+          user.id,
+
+        dispatchId:
+          dispatcherId,
+
+        patientAddress:
+          patient?.address ||
+          'Clinical Destination Hub',
+
+        patientLocation:
+          patient?.location,
+      });
+
+    console.log(
+      'DELIVERY CREATED:',
+      delivery
+    );
+
+    /*
+     * -------------------------------------------------------
+     * MARK PRESCRIPTION DISPATCHED
+     * -------------------------------------------------------
+     */
+    const updatedPrescription =
+      await ClinicalAPI.updatePrescriptionStatus(
+        prescription.id,
         {
-          id:
-            Math.random()
-              .toString(36)
-              .substr(2, 9),
-
-          prescriptionId:
-            prescription.id,
-
-          patientId:
-            prescription.patientId,
-
-          patientName:
-            prescription.patientName,
-
-          medications:
-            prescription.medications,
-
-          dosage:
-            prescription.dosage,
-
-          pharmacyId:
-            user.id,
-
-          dispatchId:
-            dispatcherId,
-
-          status:
-            'assigned',
-
-          patientAddress:
-            patient?.address ||
-            'Clinical Destination Hub',
-
-          patientLocation:
-            patient?.location,
-
-          timestamp:
-            new Date().toISOString(),
-        };
-
-      const allD =
-        JSON.parse(
-          localStorage.getItem(
-            'medi_deliveries'
-          ) || '[]'
-        );
-
-      ClinicalAPI.saveDeliveries([
-        ...allD,
-        newDelivery,
-      ]);
-
-      /*
-       * -----------------------------------------------------
-       * NOTIFICATIONS
-       * -----------------------------------------------------
-       */
-
-      await ClinicalAPI.addNotification(
-        dispatcherId,
-        'Pickup Required',
-        `New medication delivery assigned for ${prescription.patientName}`
+          status: 'dispatched',
+          pharmacyId: user.id,
+        }
       );
 
-      await ClinicalAPI.addNotification(
-        prescription.patientId,
-        'Dispatched for Delivery',
-        `Your medications have been handed to ${dispatcher.name} and are on the way.`
-      );
+    /*
+     * -------------------------------------------------------
+     * UPDATE UI
+     * -------------------------------------------------------
+     */
+    setPrescriptions((current) =>
+      current.filter(
+        (p) =>
+          p.id !==
+          prescription.id
+      )
+    );
 
-      /*
-       * Refresh visible prescriptions.
-       */
+    /*
+     * -------------------------------------------------------
+     * NOTIFY DISPATCHER
+     * -------------------------------------------------------
+     */
+    await ClinicalAPI.addNotification(
+      dispatcherId,
+      'Pickup Required',
+      `New medication delivery assigned for ${prescription.patientName}.`
+    );
 
-      setPrescriptions(
-        allP.filter((p) =>
-          [
-            'sent_to_pharmacy',
-            'preparing',
-            'ready_for_dispatch',
-          ].includes(p.status)
-        )
-      );
+    /*
+     * -------------------------------------------------------
+     * NOTIFY PATIENT
+     * -------------------------------------------------------
+     */
+    await ClinicalAPI.addNotification(
+      prescription.patientId,
+      'Dispatched for Delivery',
+      `Your medication has been assigned to ${dispatcher.name} and is ready for delivery.`
+    );
 
-      alert(
-        `Success: Logistics protocol initialized with ${dispatcher.name}`
-      );
-    } catch (error) {
-      console.error(
-        'DISPATCH ASSIGNMENT ERROR:',
-        error
-      );
+    alert(
+      `Success: Delivery assigned to ${dispatcher.name}.`
+    );
+  } catch (error) {
+    console.error(
+      'DISPATCH ASSIGNMENT ERROR:',
+      error
+    );
 
-      alert(
-        error instanceof Error
-          ? error.message
-          : 'Failed to assign dispatch partner.'
-      );
-    }
-  };
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Failed to assign dispatch partner.'
+    );
+  }
+}; 
 
   /*
    * ---------------------------------------------------------

@@ -3,19 +3,23 @@ const express = require('express');
 const {
   getAllUsers,
   getConsultants,
+  getDispatchers,
   getProfile,
   updateProfile,
   adminCreateUser,
   removeUser,
   updateUserStatus,
-  updateOnlineStatus,
   changePassword,
 } = require('../controllers/userController');
 
-const { requireAuth, requireRole } = require('../middleware/auth');
+const {
+  requireAuth,
+  requireRole,
+} = require('../middleware/auth');
 
 const router = express.Router();
 
+// Admin-only complete user list
 router.get(
   '/',
   requireAuth,
@@ -23,13 +27,23 @@ router.get(
   getAllUsers
 );
 
+// Authenticated users can see approved consultants
 router.get(
   '/consultants',
   requireAuth,
   getConsultants
 );
 
-// IMPORTANT: this must come BEFORE /:userId
+// Pharmacy can see verified dispatch partners
+router.get(
+  '/dispatchers',
+  requireAuth,
+  requireRole('PHARMACY', 'ADMIN'),
+  getDispatchers
+);
+
+// IMPORTANT:
+// Specific routes must come before /:userId
 router.patch(
   '/change-password',
   requireAuth,
@@ -46,12 +60,6 @@ router.patch(
   '/:userId',
   requireAuth,
   updateProfile
-);
-
-router.patch(
-  '/:userId/online-status',
-  requireAuth,
-  updateOnlineStatus
 );
 
 router.post(

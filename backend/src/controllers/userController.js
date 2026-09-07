@@ -142,6 +142,41 @@ async function changePassword(req, res) {
     });
   }
 }
+
+async function getDispatchers(req, res) {
+  try {
+    const dispatchers = await User.findAll({
+      where: {
+        role: 'DISPATCH',
+        isApproved: true,
+      },
+      attributes: [
+        'id',
+        'name',
+        'email',
+        'role',
+        'isApproved',
+        'isOnline',
+        'phone',
+        'address',
+        'locationLat',
+        'locationLng',
+      ],
+      order: [['name', 'ASC']],
+    });
+
+    res.json(
+      dispatchers.map((user) => user.toPublicJSON())
+    );
+  } catch (error) {
+    console.error('Get dispatchers error:', error);
+
+    res.status(500).json({
+      error: 'Failed to fetch verified dispatchers',
+      message: error.message,
+    });
+  }
+}
 // Admin: create a user directly (e.g. seeding a pharmacy/dispatch account)
 async function adminCreateUser(req, res) {
   const { name, email, password, role, ...profileFields } = req.body;
@@ -225,6 +260,7 @@ async function updateOnlineStatus(req, res) {
 module.exports = {
   getAllUsers,
   getConsultants,
+  getDispatchers,
   getProfile,
   updateProfile,
   adminCreateUser,
