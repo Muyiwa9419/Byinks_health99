@@ -230,6 +230,34 @@ async getPrescriptions(filters?: {
   );
 },
 
+  async createPrescription(data: {
+  patientId: string;
+  patientName: string;
+  consultantId?: string;
+  consultantName?: string;
+  medications: string;
+  dosage: string;
+  date?: string;
+  status?: string;
+}): Promise<Prescription> {
+  return await this.authFetch(
+    '/api/prescriptions',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        patientId: data.patientId,
+        patientName: data.patientName,
+        consultantId: data.consultantId,
+        consultantName: data.consultantName,
+        medications: data.medications,
+        dosage: data.dosage,
+        date: data.date || new Date().toLocaleDateString(),
+        status: data.status || 'sent_to_pharmacy',
+      }),
+    }
+  );
+},
+
 async updatePrescriptionStatus(
   prescriptionId: string,
   data: {

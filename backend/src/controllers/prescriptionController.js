@@ -3,6 +3,8 @@ const {
   DeliveryOrder,
 } = require('../models');
 
+const { Op } = require('sequelize');
+
 /**
  * ---------------------------------------------------------
  * LIST PRESCRIPTIONS
@@ -20,34 +22,53 @@ async function listPrescriptions(req, res) {
     const where = {};
 
     /*
-     * Role-based filtering.
+     * ---------------------------------------------------------
+     * PHARMACY
+     * ---------------------------------------------------------
      *
-     * Pharmacy users should see prescriptions assigned
-     * to them, or prescriptions that are waiting for
-     * pharmacy processing.
+     * A pharmacy must see:
+     *
+     * 1. New prescriptions sent to pharmacy that have
+     *    not yet been claimed by a pharmacy.
+     *
+     * 2. Prescriptions already claimed by this pharmacy.
      */
     if (req.user.role === 'PHARMACY') {
-      where.pharmacyId = req.user.id;
+      where[Op.or] = [
+        {
+          pharmacyId: null,
+          status: 'sent_to_pharmacy',
+        },
+        {
+          pharmacyId: req.user.id,
+        },
+      ];
     }
 
     /*
-     * Patients can only see their own prescriptions.
+     * ---------------------------------------------------------
+     * PATIENT
+     * ---------------------------------------------------------
      */
-    if (req.user.role === 'PATIENT') {
+    else if (req.user.role === 'PATIENT') {
       where.patientId = req.user.id;
     }
 
     /*
-     * Consultants can see prescriptions they created.
+     * ---------------------------------------------------------
+     * CONSULTANT
+     * ---------------------------------------------------------
      */
-    if (req.user.role === 'CONSULTANT') {
+    else if (req.user.role === 'CONSULTANT') {
       where.consultantId = req.user.id;
     }
 
     /*
-     * Admin can query freely.
+     * ---------------------------------------------------------
+     * ADMIN
+     * ---------------------------------------------------------
      */
-    if (req.user.role === 'ADMIN') {
+    else if (req.user.role === 'ADMIN') {
       if (patientId) {
         where.patientId = patientId;
       }
@@ -59,24 +80,69 @@ async function listPrescriptions(req, res) {
       if (pharmacyId) {
         where.pharmacyId = pharmacyId;
       }
+
+      if (status) {
+        where.status = status;
+      }
     }
 
     /*
-     * Status can be used by all authorized roles.
+     * ---------------------------------------------------------
+     * OPTIONAL STATUS FILTER
+     * ---------------------------------------------------------
+     *
+     * Do not apply this blindly to PHARMACY because the
+     * pharmacy query already has a controlled OR condition.
      */
-    if (status) {
+    if (
+      status &&
+      req.user.role !== 'ADMIN' &&
+      req.user.role !== 'PHARMACY'
+    ) {
       where.status = status;
     }
 
-    const prescriptions =
-      await Prescription.findAll({
-        where,
-        order: [
-          ['createdAt', 'DESC'],
-        ],
-      });
+    const prescriptions = await Prescription.findAll({
+      where,
+      order: [
+        ['createdAt', 'DESC'],
+      ],
+    });
+
+    console.log(
+      '[PRESCRIPTIONS] User:',
+      {
+        id: req.user.id,
+        role: req.user.role,
+      }
+    );
+
+    console.log(
+      '[PRESCRIPTIONS] Query:',
+      req.query
+    );
+
+    console.log(
+      '[PRESCRIPTIONS] Returning:',
+      prescriptions.length
+    );
+
+    if (req.user.role === 'PHARMACY') {
+      console.log(
+        '[PHARMACY] Prescriptions:',
+        prescriptions.map((p) => ({
+          id: p.id,
+          patientId: p.patientId,
+          patientName: p.patientName,
+          consultantId: p.consultantId,
+          status: p.status,
+          pharmacyId: p.pharmacyId,
+        }))
+      );
+    }
 
     return res.json(prescriptions);
+
   } catch (error) {
     console.error(
       'List prescriptions error:',
@@ -99,38 +165,65 @@ async function listPrescriptions(req, res) {
 async function createPrescription(req, res) {
   try {
     /*
-     * Only consultants should create prescriptions.
+     * Only consultants and admins should create prescriptions.
      */
     if (
       req.user.role !== 'CONSULTANT' &&
       req.user.role !== 'ADMIN'
     ) {
       return res.status(403).json({
-        error:
-          'Only consultants can create prescriptions',
+        error: 'Only consultants can create prescriptions',
       });
     }
 
+    /*
+     * Build prescription data.
+     *
+     * Consultants cannot impersonate another consultant.
+     * Their authenticated account becomes the consultant.
+     */
     const prescriptionData = {
       ...req.body,
 
-      /*
-       * Always use the authenticated consultant ID
-       * rather than trusting the browser.
-       */
       consultantId:
         req.user.role === 'CONSULTANT'
           ? req.user.id
           : req.body.consultantId,
 
-      /*
-       * New prescriptions must start in a pharmacy
-       * waiting state.
-       */
+      consultantName:
+        req.user.role === 'CONSULTANT'
+          ? req.user.name
+          : req.body.consultantName,
+
+      date:
+        req.body.date ||
+        new Date().toLocaleDateString(),
+
       status:
-  req.body.status ||
-  'sent_to_pharmacy',
+        req.body.status ||
+        'sent_to_pharmacy',
+
+      /*
+       * A newly created prescription is not yet assigned
+       * to a pharmacy.
+       */
+      pharmacyId: null,
     };
+
+    /*
+     * Required fields.
+     */
+    if (
+      !prescriptionData.patientId ||
+      !prescriptionData.patientName ||
+      !prescriptionData.medications ||
+      !prescriptionData.dosage
+    ) {
+      return res.status(400).json({
+        error:
+          'patientId, patientName, medications and dosage are required',
+      });
+    }
 
     const prescription =
       await Prescription.create(
@@ -141,18 +234,31 @@ async function createPrescription(req, res) {
       'PRESCRIPTION CREATED:',
       {
         id: prescription.id,
-        patientId:
-          prescription.patientId,
-        consultantId:
-          prescription.consultantId,
-        status:
-          prescription.status,
+        patientId: prescription.patientId,
+        consultantId: prescription.consultantId,
+        pharmacyId: prescription.pharmacyId,
+        status: prescription.status,
       }
     );
+
+    /*
+     * Notify connected clients if Socket.IO is available.
+     *
+     * PostgreSQL remains the source of truth.
+     */
+    const io = req.app.get('io');
+
+    if (io) {
+      io.emit(
+        'prescription:created',
+        prescription
+      );
+    }
 
     return res.status(201).json(
       prescription
     );
+
   } catch (error) {
     console.error(
       'Create prescription error:',
@@ -160,8 +266,7 @@ async function createPrescription(req, res) {
     );
 
     return res.status(500).json({
-      error:
-        'Failed to create prescription',
+      error: 'Failed to create prescription',
       message: error.message,
     });
   }
@@ -191,8 +296,7 @@ async function updatePrescriptionStatus(
 
     if (!prescription) {
       return res.status(404).json({
-        error:
-          'Prescription not found',
+        error: 'Prescription not found',
       });
     }
 
@@ -201,14 +305,12 @@ async function updatePrescriptionStatus(
      * PHARMACY ACTIONS
      * -----------------------------------------------------
      */
-
     if (req.user.role === 'PHARMACY') {
-      /*
-       * Pharmacy can only update prescriptions
-       * assigned to them OR claim an unassigned
-       * prescription.
-       */
 
+      /*
+       * Pharmacy can update prescriptions assigned
+       * to them OR claim an unassigned prescription.
+       */
       if (
         prescription.pharmacyId &&
         prescription.pharmacyId !== req.user.id
@@ -225,7 +327,6 @@ async function updatePrescriptionStatus(
      * PATIENT ACTIONS
      * -----------------------------------------------------
      */
-
     if (req.user.role === 'PATIENT') {
       if (
         prescription.patientId !==
@@ -240,10 +341,33 @@ async function updatePrescriptionStatus(
 
     /*
      * -----------------------------------------------------
+     * VALID STATUSES
+     * -----------------------------------------------------
+     */
+    const validStatuses = [
+      'draft',
+      'sent_to_pharmacy',
+      'preparing',
+      'ready_for_dispatch',
+      'dispatched',
+      'delivered',
+    ];
+
+    if (
+      status &&
+      !validStatuses.includes(status)
+    ) {
+      return res.status(400).json({
+        error: 'Invalid prescription status',
+        validStatuses,
+      });
+    }
+
+    /*
+     * -----------------------------------------------------
      * BUILD UPDATE
      * -----------------------------------------------------
      */
-
     const updates = {};
 
     if (status) {
@@ -255,35 +379,27 @@ async function updatePrescriptionStatus(
      * pharmacy while the user is a pharmacy account.
      */
     if (req.user.role === 'PHARMACY') {
-      updates.pharmacyId =
-        req.user.id;
+      updates.pharmacyId = req.user.id;
     } else if (pharmacyId) {
-      updates.pharmacyId =
-        pharmacyId;
+      updates.pharmacyId = pharmacyId;
     }
 
     await prescription.update(
       updates
     );
 
-
-    /**
+    /*
      * -----------------------------------------------------
-     * PHARMACY CONFIRMS MEDICATION AVAILABLE
+     * PHARMACY READY FOR DISPATCH
      * -----------------------------------------------------
      *
-     * The expected status is:
-     *
-     * available
-     *
-     * Then the pharmacy can move it to:
-     *
-     * ready_for_dispatch
+     * When the pharmacy marks a prescription as
+     * ready_for_dispatch, create a delivery order.
      */
     if (
-      status ===
-      'ready_for_dispatch'
+      status === 'ready_for_dispatch'
     ) {
+
       /*
        * Make sure a pharmacy has actually
        * been assigned.
@@ -365,40 +481,30 @@ async function updatePrescriptionStatus(
       }
 
       /*
-       * Broadcast to Socket.IO if available.
-       *
-       * This does NOT replace PostgreSQL.
-       * PostgreSQL remains the source of truth.
+       * Broadcast delivery/prescription update
+       * if Socket.IO is available.
        */
-      const io =
-        req.app.get('io');
+      const io = req.app.get('io');
 
       if (io) {
         io.emit(
-          'delivery:new',
-          deliveryOrder
+          'prescription:ready_for_dispatch',
+          prescription
         );
 
-        /*
-         * Also notify pharmacy/dispatch clients
-         * that prescription processing changed.
-         */
         io.emit(
-          'prescription:updated',
-          prescription
+          'delivery:created',
+          deliveryOrder
         );
       }
     }
 
-
-    /**
+    /*
      * -----------------------------------------------------
      * GENERAL PRESCRIPTION BROADCAST
      * -----------------------------------------------------
      */
-
-    const io =
-      req.app.get('io');
+    const io = req.app.get('io');
 
     if (io) {
       io.emit(
@@ -407,9 +513,16 @@ async function updatePrescriptionStatus(
       );
     }
 
+    /*
+     * Reload so the response contains the latest
+     * database values.
+     */
+    await prescription.reload();
+
     return res.json(
       prescription
     );
+
   } catch (error) {
     console.error(
       'Update prescription status error:',
@@ -417,8 +530,7 @@ async function updatePrescriptionStatus(
     );
 
     return res.status(500).json({
-      error:
-        'Failed to update prescription',
+      error: 'Failed to update prescription',
       message: error.message,
     });
   }

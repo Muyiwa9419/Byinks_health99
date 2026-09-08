@@ -305,146 +305,130 @@ const ConsultantDashboard: React.FC<ConsultantDashboardProps> = ({
    */
 
   const handleIssuePrescription = async (
-    e: React.FormEvent
-  ) => {
-    e.preventDefault();
+  e: React.FormEvent
+) => {
+  e.preventDefault();
 
-    if (!prescribingFor) return;
+  if (!prescribingFor) return;
 
+  try {
+    /*
+     * -------------------------------------------------------
+     * VALIDATE PRESCRIPTION
+     * -------------------------------------------------------
+     */
+    if (!prescriptionData.medications.trim()) {
+      alert('Please enter the medication.');
+      return;
+    }
+
+    if (!prescriptionData.dosage.trim()) {
+      alert('Please enter the dosage instructions.');
+      return;
+    }
+
+    /*
+     * -------------------------------------------------------
+     * CREATE PRESCRIPTION IN POSTGRESQL
+     * -------------------------------------------------------
+     *
+     * DO NOT create a fake local ID here.
+     * The backend/database must generate the real ID.
+     */
+    const prescription = await ClinicalAPI.createPrescription({
+  patientId: prescribingFor.patientId,
+  patientName: prescribingFor.patientName,
+  consultantId: user.id,
+  consultantName: user.name,
+  medications: prescriptionData.medications,
+  dosage: prescriptionData.dosage,
+  date: new Date().toLocaleDateString(),
+  status: 'sent_to_pharmacy',
+});
+
+    console.log(
+      'PRESCRIPTION BROADCAST TO PHARMACY:',
+      prescription
+    );
+
+    /*
+     * -------------------------------------------------------
+     * MARK MEDICAL REPORT AS VETTED
+     * -------------------------------------------------------
+     */
+    await ClinicalAPI.reviewReport(
+      prescribingFor.id,
+      {
+        status: 'vetted',
+
+        consultantNote:
+          'Report reviewed and prescription issued.',
+
+        vettedBy:
+          user.id,
+      }
+    );
+
+    /*
+     * -------------------------------------------------------
+     * NOTIFY PATIENT
+     * -------------------------------------------------------
+     */
     try {
-      const newPrescription: Prescription = {
-        id: Math.random()
-          .toString(36)
-          .substr(2, 9),
-
-        patientId:
-          prescribingFor.patientId,
-
-        patientName:
-          prescribingFor.patientName,
-
-        consultantId: user.id,
-
-        consultantName: user.name,
-
-        medications:
-          prescriptionData.medications,
-
-        dosage:
-          prescriptionData.dosage,
-
-        date:
-          new Date().toLocaleDateString(),
-
-        status: 'sent_to_pharmacy',
-      };
-
-      /*
-       * Save prescription locally.
-       */
-      const allPrescriptions: Prescription[] =
-        JSON.parse(
-          localStorage.getItem(
-            'medi_prescriptions'
-          ) || '[]'
-        );
-
-      await ClinicalAPI.savePrescriptions([
-        ...allPrescriptions,
-        newPrescription,
-      ]);
-
-      /*
-       * Mark report as vetted in PostgreSQL.
-       */
-      await ClinicalAPI.reviewReport(
-        prescribingFor.id,
-        {
-          status: 'vetted',
-
-          consultantNote:
-            'Report reviewed and prescription issued.',
-
-          vettedBy: user.id,
-        }
-      );
-
-      /*
-       * Reload pending reports.
-       */
-      const updatedReports =
-        await ClinicalAPI.getReports({
-          status: 'pending_review',
-        });
-
-      console.log(
-        'UPDATED CONSULTANT REPORTS:',
-        updatedReports
-      );
-
-      setReports(updatedReports);
-
-      /*
-       * Notify patient.
-       */
       await ClinicalAPI.addNotification(
         prescribingFor.patientId,
         'Prescription Issued',
         `Dr. ${user.name} has vetted your report and sent a prescription to the pharmacy.`
       );
-
-      /*
-       * Notify pharmacies.
-       */
-      const registeredUsers: User[] =
-        JSON.parse(
-          localStorage.getItem(
-            'medi_registered_users'
-          ) || '[]'
-        );
-
-      const pharmacies =
-        registeredUsers.filter(
-          (u) =>
-            u.role === UserRole.PHARMACY
-        );
-
-      for (const pharmacy of pharmacies) {
-        await ClinicalAPI.addNotification(
-          pharmacy.id,
-          'New Prescription Received',
-          `New prescription for ${prescribingFor.patientName}`
-        );
-      }
-
-      /*
-       * Reset UI.
-       */
-      setPrescribingFor(null);
-      setSelectedReport(null);
-      setPatientData(null);
-
-      setPrescriptionData({
-        medications: '',
-        dosage: '',
-      });
-
-      alert(
-        'Prescription synchronized with Pharmacy Hub.'
-      );
-    } catch (error) {
-      console.error(
-        'Failed to issue prescription:',
-        error
-      );
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : 'Failed to issue prescription'
+    } catch (notificationError) {
+      console.warn(
+        'Patient notification failed:',
+        notificationError
       );
     }
-  };
+
+    /*
+     * -------------------------------------------------------
+     * RELOAD CONSULTANT REPORT QUEUE
+     * -------------------------------------------------------
+     */
+    const updatedReports =
+      await ClinicalAPI.getReports({
+        status: 'pending_review',
+      });
+
+    setReports(updatedReports);
+
+    /*
+     * -------------------------------------------------------
+     * RESET PRESCRIPTION PAD
+     * -------------------------------------------------------
+     */
+    setPrescribingFor(null);
+    setSelectedReport(null);
+    setPatientData(null);
+
+    setPrescriptionData({
+      medications: '',
+      dosage: '',
+    });
+
+    alert(
+      'Prescription successfully broadcast to Pharmacy Hub.'
+    );
+  } catch (error) {
+    console.error(
+      'Failed to issue prescription:',
+      error
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Failed to broadcast prescription to Pharmacy Hub.'
+    );
+  }
+};
 
   /*
    * ============================================================
