@@ -313,6 +313,52 @@ async assignDelivery(
   );
 },
 
+  async getDeliveries(filters?: {
+    patientId?: string;
+    pharmacyId?: string;
+    dispatchId?: string;
+    status?: string;
+  }): Promise<DeliveryOrder[]> {
+    const params = new URLSearchParams();
+
+    if (filters?.patientId) {
+      params.set('patientId', filters.patientId);
+    }
+
+    if (filters?.pharmacyId) {
+      params.set('pharmacyId', filters.pharmacyId);
+    }
+
+    if (filters?.dispatchId) {
+      params.set('dispatchId', filters.dispatchId);
+    }
+
+    if (filters?.status) {
+      params.set('status', filters.status);
+    }
+
+    const query = params.toString();
+
+    return await this.authFetch(
+      `/api/deliveries${query ? `?${query}` : ''}`
+    );
+  },
+
+  async updateDeliveryStatus(
+    deliveryId: string,
+    status: DeliveryOrder['status']
+  ): Promise<DeliveryOrder> {
+    return await this.authFetch(
+      `/api/deliveries/${deliveryId}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status,
+        }),
+      }
+    );
+  },
+
 
 async uploadMedicalReport(
   file: File,
