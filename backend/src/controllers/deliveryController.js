@@ -1,4 +1,3 @@
-
 const { DeliveryOrder } = require('../models');
 const { Op } = require('sequelize');
 const { getIO } = require('../sockets');
@@ -21,16 +20,15 @@ const DELIVERY_STATUSES = [
  * LIST DELIVERIES
  * ---------------------------------------------------------
  *
- * Supports:
- *
  * GET /api/deliveries
- * GET /api/deliveries?patientId=...
- * GET /api/deliveries?pharmacyId=...
- * GET /api/deliveries?dispatchId=...
- * GET /api/deliveries?status=pending
  *
- * Dispatch users automatically receive only active deliveries
- * when no specific status was requested.
+ * Dispatch users receive:
+ *
+ * - pending deliveries
+ * - deliveries assigned to them
+ * - deliveries currently in transit assigned to them
+ *
+ * Other roles can use the normal filters.
  */
 async function listDeliveries(req, res) {
   try {
@@ -45,7 +43,7 @@ async function listDeliveries(req, res) {
 
     /**
      * -----------------------------------------------------
-     * FILTERS
+     * PATIENT FILTER
      * -----------------------------------------------------
      */
 
@@ -53,9 +51,21 @@ async function listDeliveries(req, res) {
       where.patientId = patientId;
     }
 
+    /**
+     * -----------------------------------------------------
+     * PHARMACY FILTER
+     * -----------------------------------------------------
+     */
+
     if (pharmacyId) {
       where.pharmacyId = pharmacyId;
     }
+
+    /**
+     * -----------------------------------------------------
+     * DISPATCH FILTER
+     * -----------------------------------------------------
+     */
 
     if (dispatchId) {
       where.dispatchId = dispatchId;
@@ -79,34 +89,61 @@ async function listDeliveries(req, res) {
 
     /**
      * -----------------------------------------------------
-     * DISPATCH QUEUE
+     * DISPATCH USER QUEUE
      * -----------------------------------------------------
      *
-     * If a dispatch user requests deliveries without
-     * specifying a status, return active delivery jobs.
+     * When a dispatcher loads the dashboard without a
+     * specific status/filter:
      *
-     * pending:
-     *   Available for dispatch assignment
+     * pending
+     * assigned to this dispatcher
+     * in_transit assigned to this dispatcher
      *
-     * assigned:
-     *   Assigned to a dispatch rider
-     *
-     * in_transit:
-     *   Currently being delivered
+     * This prevents one dispatcher from seeing another
+     * dispatcher's active deliveries.
      */
 
     if (
       req.user &&
       req.user.role === 'DISPATCH' &&
-      !status
+      !status &&
+      !dispatchId
     ) {
-      where.status = {
-        [Op.in]: [
-          'pending',
-          'assigned',
-          'in_transit',
-        ],
-      };
+      where[Op.or] = [
+        {
+          status: 'pending',
+        },
+        {
+          dispatchId: req.user.id,
+          status: {
+            [Op.in]: [
+              'assigned',
+              'in_transit',
+            ],
+          },
+        },
+      ];
+    }
+
+    /**
+     * -----------------------------------------------------
+     * EXPLICIT DISPATCH ID
+     * -----------------------------------------------------
+     *
+     * If a dispatcher explicitly asks for a dispatchId,
+     * don't allow them to request another dispatcher's jobs.
+     */
+
+    if (
+      req.user &&
+      req.user.role === 'DISPATCH' &&
+      dispatchId &&
+      dispatchId !== req.user.id
+    ) {
+      return res.status(403).json({
+        error:
+          'You are not authorized to view another dispatcher deliveries',
+      });
     }
 
     /**
@@ -118,6 +155,7 @@ async function listDeliveries(req, res) {
     const deliveries =
       await DeliveryOrder.findAll({
         where,
+
         order: [
           ['createdAt', 'DESC'],
         ],
@@ -129,7 +167,7 @@ async function listDeliveries(req, res) {
      * -----------------------------------------------------
      */
 
-    res.json(
+    return res.json(
       deliveries.map((delivery) =>
         delivery.toPublicJSON()
       )
@@ -140,7 +178,7 @@ async function listDeliveries(req, res) {
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Failed to load deliveries',
       message: error.message,
     });
@@ -152,12 +190,8 @@ async function listDeliveries(req, res) {
  * CREATE DELIVERY
  * ---------------------------------------------------------
  *
- * Normally a delivery should be created automatically
- * when the pharmacy marks a prescription:
- *
- * ready_for_dispatch
- *
- * This endpoint is still kept for compatibility.
+ * Normally created automatically when pharmacy marks
+ * prescription as ready_for_dispatch.
  */
 async function createDelivery(req, res) {
   try {
@@ -165,6 +199,7 @@ async function createDelivery(req, res) {
       prescriptionId,
       patientId,
       patientName,
+      patientPhone,
       medications,
       dosage,
       pharmacyId,
@@ -174,7 +209,9 @@ async function createDelivery(req, res) {
     } = req.body;
 
     /**
-     * Required fields
+     * -----------------------------------------------------
+     * REQUIRED FIELDS
+     * -----------------------------------------------------
      */
 
     if (
@@ -193,8 +230,9 @@ async function createDelivery(req, res) {
     }
 
     /**
-     * Prevent duplicate deliveries for
-     * the same prescription.
+     * -----------------------------------------------------
+     * DUPLICATE CHECK
+     * -----------------------------------------------------
      */
 
     const existing =
@@ -208,34 +246,51 @@ async function createDelivery(req, res) {
       return res.status(409).json({
         error:
           'A delivery already exists for this prescription',
+
         delivery:
           existing.toPublicJSON(),
       });
     }
 
     /**
-     * Create delivery.
+     * -----------------------------------------------------
+     * CREATE DELIVERY
+     * -----------------------------------------------------
      */
 
     const delivery =
       await DeliveryOrder.create({
         prescriptionId,
+
         patientId,
+
         patientName,
+
+        patientPhone:
+          patientPhone || null,
+
         medications,
+
         dosage,
+
         pharmacyId,
+
         dispatchId:
           dispatchId || null,
+
         status:
           dispatchId
             ? 'assigned'
             : 'pending',
+
         patientAddress,
+
         patientLocationLat:
           patientLocation?.lat ?? null,
+
         patientLocationLng:
           patientLocation?.lng ?? null,
+
         timestamp:
           new Date().toISOString(),
       });
@@ -253,7 +308,7 @@ async function createDelivery(req, res) {
 
     if (io) {
       /**
-       * Notify pharmacy
+       * Notify pharmacy.
        */
       io.emit(
         'delivery:created',
@@ -261,7 +316,7 @@ async function createDelivery(req, res) {
       );
 
       /**
-       * Notify patient
+       * Notify patient.
        */
       io.to(
         `patient:${patientId}`
@@ -271,15 +326,28 @@ async function createDelivery(req, res) {
       );
 
       /**
-       * Notify dispatch
+       * Notify dispatch.
        */
       io.emit(
         'dispatch:new_delivery',
         publicDelivery
       );
+
+      /**
+       * If already assigned, notify that dispatcher
+       * specifically.
+       */
+      if (dispatchId) {
+        io.to(
+          `dispatch:${dispatchId}`
+        ).emit(
+          'delivery:assigned',
+          publicDelivery
+        );
+      }
     }
 
-    res.status(201).json(
+    return res.status(201).json(
       publicDelivery
     );
   } catch (error) {
@@ -288,10 +356,12 @@ async function createDelivery(req, res) {
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       error:
         'Failed to create delivery',
-      message: error.message,
+
+      message:
+        error.message,
     });
   }
 }
@@ -302,12 +372,6 @@ async function createDelivery(req, res) {
  * ---------------------------------------------------------
  *
  * PATCH /api/deliveries/:id/assign
- *
- * Body:
- *
- * {
- *   "dispatchId": "..."
- * }
  */
 async function assignDispatch(req, res) {
   try {
@@ -335,7 +399,7 @@ async function assignDispatch(req, res) {
     }
 
     /**
-     * Don't assign a completed delivery.
+     * Don't assign delivered orders.
      */
 
     if (
@@ -355,6 +419,8 @@ async function assignDispatch(req, res) {
     await delivery.update({
       dispatchId,
       status: 'assigned',
+      timestamp:
+        new Date().toISOString(),
     });
 
     const publicDelivery =
@@ -370,7 +436,7 @@ async function assignDispatch(req, res) {
 
     if (io) {
       /**
-       * Notify the assigned dispatch rider.
+       * Assigned dispatcher.
        */
       io.to(
         `dispatch:${dispatchId}`
@@ -380,7 +446,7 @@ async function assignDispatch(req, res) {
       );
 
       /**
-       * Notify patient.
+       * Patient.
        */
       io.to(
         `patient:${delivery.patientId}`
@@ -390,7 +456,7 @@ async function assignDispatch(req, res) {
       );
 
       /**
-       * Notify pharmacy.
+       * Pharmacy.
        */
       io.to(
         `pharmacy:${delivery.pharmacyId}`
@@ -400,7 +466,7 @@ async function assignDispatch(req, res) {
       );
 
       /**
-       * Delivery-specific room.
+       * Delivery room.
        */
       io.to(
         `delivery:${delivery.id}`
@@ -410,7 +476,7 @@ async function assignDispatch(req, res) {
       );
     }
 
-    res.json(
+    return res.json(
       publicDelivery
     );
   } catch (error) {
@@ -419,10 +485,12 @@ async function assignDispatch(req, res) {
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       error:
         'Failed to assign dispatch rider',
-      message: error.message,
+
+      message:
+        error.message,
     });
   }
 }
@@ -433,19 +501,6 @@ async function assignDispatch(req, res) {
  * ---------------------------------------------------------
  *
  * PATCH /api/deliveries/:id/status
- *
- * Body:
- *
- * {
- *   "status": "in_transit"
- * }
- *
- * Valid:
- *
- * pending
- * assigned
- * in_transit
- * delivered
  */
 async function updateDeliveryStatus(
   req,
@@ -469,6 +524,7 @@ async function updateDeliveryStatus(
       return res.status(400).json({
         error:
           'Invalid delivery status',
+
         allowedStatuses:
           DELIVERY_STATUSES,
       });
@@ -491,7 +547,7 @@ async function updateDeliveryStatus(
     }
 
     /**
-     * Don't allow changes after delivery.
+     * Don't move delivered orders backwards.
      */
 
     if (
@@ -506,11 +562,12 @@ async function updateDeliveryStatus(
     }
 
     /**
-     * Update.
+     * Update status.
      */
 
     await delivery.update({
       status,
+
       timestamp:
         new Date().toISOString(),
     });
@@ -528,7 +585,7 @@ async function updateDeliveryStatus(
 
     if (io) {
       /**
-       * Everyone watching this delivery.
+       * Delivery room.
        */
       io.to(
         `delivery:${delivery.id}`
@@ -558,11 +615,9 @@ async function updateDeliveryStatus(
       );
 
       /**
-       * Dispatch rider.
+       * Dispatcher.
        */
-      if (
-        delivery.dispatchId
-      ) {
+      if (delivery.dispatchId) {
         io.to(
           `dispatch:${delivery.dispatchId}`
         ).emit(
@@ -570,9 +625,17 @@ async function updateDeliveryStatus(
           publicDelivery
         );
       }
+
+      /**
+       * General dispatch notification.
+       */
+      io.emit(
+        'dispatch:delivery_updated',
+        publicDelivery
+      );
     }
 
-    res.json(
+    return res.json(
       publicDelivery
     );
   } catch (error) {
@@ -581,10 +644,12 @@ async function updateDeliveryStatus(
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       error:
         'Failed to update delivery status',
-      message: error.message,
+
+      message:
+        error.message,
     });
   }
 }
@@ -595,21 +660,12 @@ async function updateDeliveryStatus(
  * ---------------------------------------------------------
  *
  * PATCH /api/deliveries/:id/confirm
- *
- * This endpoint is used by the patient after receiving
- * the medication.
- *
- * The delivery must already be marked as "delivered".
  */
 async function confirmDelivery(
   req,
   res
 ) {
   try {
-    /**
-     * Find delivery.
-     */
-
     const delivery =
       await DeliveryOrder.findByPk(
         req.params.id
@@ -623,8 +679,7 @@ async function confirmDelivery(
     }
 
     /**
-     * Make sure the logged-in patient owns
-     * this delivery.
+     * Patient ownership check.
      */
 
     if (
@@ -639,8 +694,7 @@ async function confirmDelivery(
     }
 
     /**
-     * Delivery must have reached the delivered
-     * state before the patient can confirm receipt.
+     * Must already be delivered.
      */
 
     if (
@@ -650,18 +704,14 @@ async function confirmDelivery(
       return res.status(400).json({
         error:
           'Delivery must be marked as delivered before confirmation',
+
         currentStatus:
           delivery.status,
       });
     }
 
     /**
-     * If the model already supports a confirmation
-     * field, update it.
-     *
-     * Otherwise, the delivery remains in the
-     * delivered state and the confirmation is
-     * communicated through Socket.IO.
+     * Optional confirmation fields.
      */
 
     const updateFields = {};
@@ -672,7 +722,8 @@ async function confirmDelivery(
         'patientConfirmed'
       )
     ) {
-      updateFields.patientConfirmed = true;
+      updateFields.patientConfirmed =
+        true;
     }
 
     if (
@@ -686,7 +737,8 @@ async function confirmDelivery(
     }
 
     if (
-      Object.keys(updateFields).length > 0
+      Object.keys(updateFields).length >
+      0
     ) {
       await delivery.update(
         updateFields
@@ -705,9 +757,6 @@ async function confirmDelivery(
     const io = getIO();
 
     if (io) {
-      /**
-       * Notify the patient.
-       */
       io.to(
         `patient:${delivery.patientId}`
       ).emit(
@@ -715,9 +764,6 @@ async function confirmDelivery(
         publicDelivery
       );
 
-      /**
-       * Notify pharmacy.
-       */
       io.to(
         `pharmacy:${delivery.pharmacyId}`
       ).emit(
@@ -725,12 +771,7 @@ async function confirmDelivery(
         publicDelivery
       );
 
-      /**
-       * Notify dispatch rider.
-       */
-      if (
-        delivery.dispatchId
-      ) {
+      if (delivery.dispatchId) {
         io.to(
           `dispatch:${delivery.dispatchId}`
         ).emit(
@@ -739,9 +780,6 @@ async function confirmDelivery(
         );
       }
 
-      /**
-       * Notify anyone watching the delivery.
-       */
       io.to(
         `delivery:${delivery.id}`
       ).emit(
@@ -750,10 +788,12 @@ async function confirmDelivery(
       );
     }
 
-    res.json({
+    return res.json({
       success: true,
+
       message:
         'Delivery receipt confirmed successfully',
+
       delivery:
         publicDelivery,
     });
@@ -763,10 +803,12 @@ async function confirmDelivery(
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       error:
         'Failed to confirm delivery',
-      message: error.message,
+
+      message:
+        error.message,
     });
   }
 }
@@ -777,13 +819,6 @@ async function confirmDelivery(
  * ---------------------------------------------------------
  *
  * PATCH /api/deliveries/:id/location
- *
- * Body:
- *
- * {
- *   "lat": 6.5244,
- *   "lng": 3.3792
- * }
  */
 async function updateLocation(
   req,
@@ -844,8 +879,10 @@ async function updateLocation(
     await delivery.update({
       currentLocationLat:
         lat,
+
       currentLocationLng:
         lng,
+
       timestamp:
         new Date().toISOString(),
     });
@@ -865,12 +902,14 @@ async function updateLocation(
       const locationPayload = {
         deliveryId:
           delivery.id,
+
         lat,
+
         lng,
       };
 
       /**
-       * Delivery-specific room.
+       * Delivery room.
        */
       io.to(
         `delivery:${delivery.id}`
@@ -898,9 +937,21 @@ async function updateLocation(
         'delivery:location',
         locationPayload
       );
+
+      /**
+       * Dispatcher.
+       */
+      if (delivery.dispatchId) {
+        io.to(
+          `dispatch:${delivery.dispatchId}`
+        ).emit(
+          'delivery:location',
+          locationPayload
+        );
+      }
     }
 
-    res.json(
+    return res.json(
       publicDelivery
     );
   } catch (error) {
@@ -909,10 +960,12 @@ async function updateLocation(
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       error:
         'Failed to update delivery location',
-      message: error.message,
+
+      message:
+        error.message,
     });
   }
 }

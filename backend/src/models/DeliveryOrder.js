@@ -25,6 +25,12 @@ const DeliveryOrder = sequelize.define(
       allowNull: false,
     },
 
+    // Patient phone number for the dispatcher
+    patientPhone: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+
     medications: {
       type: DataTypes.TEXT,
       allowNull: false,
@@ -53,7 +59,6 @@ const DeliveryOrder = sequelize.define(
         'delivered',
         'completed'
       ),
-
       defaultValue: 'pending',
     },
 
@@ -62,13 +67,25 @@ const DeliveryOrder = sequelize.define(
       allowNull: false,
     },
 
-    patientLocationLat: DataTypes.FLOAT,
+    patientLocationLat: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+    },
 
-    patientLocationLng: DataTypes.FLOAT,
+    patientLocationLng: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+    },
 
-    currentLocationLat: DataTypes.FLOAT,
+    currentLocationLat: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+    },
 
-    currentLocationLng: DataTypes.FLOAT,
+    currentLocationLng: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+    },
 
     timestamp: {
       type: DataTypes.STRING,
@@ -107,7 +124,6 @@ DeliveryOrder.prototype.toPublicJSON =
 
     delete d.patientLocationLat;
     delete d.patientLocationLng;
-
     delete d.currentLocationLat;
     delete d.currentLocationLng;
 
@@ -115,11 +131,15 @@ DeliveryOrder.prototype.toPublicJSON =
       ...d,
 
       ...(patientLocation
-        ? { patientLocation }
+        ? {
+            patientLocation,
+          }
         : {}),
 
       ...(currentLocation
-        ? { currentLocation }
+        ? {
+            currentLocation,
+          }
         : {}),
     };
   };

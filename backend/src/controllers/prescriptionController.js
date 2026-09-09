@@ -1,6 +1,7 @@
 const {
   Prescription,
   DeliveryOrder,
+  User,
 } = require('../models');
 
 const { Op } = require('sequelize');
@@ -102,12 +103,14 @@ async function listPrescriptions(req, res) {
       where.status = status;
     }
 
-    const prescriptions = await Prescription.findAll({
-      where,
-      order: [
-        ['createdAt', 'DESC'],
-      ],
-    });
+    const prescriptions =
+      await Prescription.findAll({
+        where,
+
+        order: [
+          ['createdAt', 'DESC'],
+        ],
+      });
 
     console.log(
       '[PRESCRIPTIONS] User:',
@@ -141,7 +144,9 @@ async function listPrescriptions(req, res) {
       );
     }
 
-    return res.json(prescriptions);
+    return res.json(
+      prescriptions
+    );
 
   } catch (error) {
     console.error(
@@ -150,8 +155,11 @@ async function listPrescriptions(req, res) {
     );
 
     return res.status(500).json({
-      error: 'Failed to load prescriptions',
-      message: error.message,
+      error:
+        'Failed to load prescriptions',
+
+      message:
+        error.message,
     });
   }
 }
@@ -172,7 +180,8 @@ async function createPrescription(req, res) {
       req.user.role !== 'ADMIN'
     ) {
       return res.status(403).json({
-        error: 'Only consultants can create prescriptions',
+        error:
+          'Only consultants can create prescriptions',
       });
     }
 
@@ -233,11 +242,20 @@ async function createPrescription(req, res) {
     console.log(
       'PRESCRIPTION CREATED:',
       {
-        id: prescription.id,
-        patientId: prescription.patientId,
-        consultantId: prescription.consultantId,
-        pharmacyId: prescription.pharmacyId,
-        status: prescription.status,
+        id:
+          prescription.id,
+
+        patientId:
+          prescription.patientId,
+
+        consultantId:
+          prescription.consultantId,
+
+        pharmacyId:
+          prescription.pharmacyId,
+
+        status:
+          prescription.status,
       }
     );
 
@@ -266,8 +284,11 @@ async function createPrescription(req, res) {
     );
 
     return res.status(500).json({
-      error: 'Failed to create prescription',
-      message: error.message,
+      error:
+        'Failed to create prescription',
+
+      message:
+        error.message,
     });
   }
 }
@@ -289,6 +310,12 @@ async function updatePrescriptionStatus(
       patientAddress,
     } = req.body;
 
+    /*
+     * -----------------------------------------------------
+     * FIND PRESCRIPTION
+     * -----------------------------------------------------
+     */
+
     const prescription =
       await Prescription.findByPk(
         req.params.id
@@ -296,7 +323,8 @@ async function updatePrescriptionStatus(
 
     if (!prescription) {
       return res.status(404).json({
-        error: 'Prescription not found',
+        error:
+          'Prescription not found',
       });
     }
 
@@ -305,8 +333,9 @@ async function updatePrescriptionStatus(
      * PHARMACY ACTIONS
      * -----------------------------------------------------
      */
-    if (req.user.role === 'PHARMACY') {
-
+    if (
+      req.user.role === 'PHARMACY'
+    ) {
       /*
        * Pharmacy can update prescriptions assigned
        * to them OR claim an unassigned prescription.
@@ -327,7 +356,9 @@ async function updatePrescriptionStatus(
      * PATIENT ACTIONS
      * -----------------------------------------------------
      */
-    if (req.user.role === 'PATIENT') {
+    if (
+      req.user.role === 'PATIENT'
+    ) {
       if (
         prescription.patientId !==
         req.user.id
@@ -344,6 +375,7 @@ async function updatePrescriptionStatus(
      * VALID STATUSES
      * -----------------------------------------------------
      */
+
     const validStatuses = [
       'draft',
       'sent_to_pharmacy',
@@ -358,7 +390,9 @@ async function updatePrescriptionStatus(
       !validStatuses.includes(status)
     ) {
       return res.status(400).json({
-        error: 'Invalid prescription status',
+        error:
+          'Invalid prescription status',
+
         validStatuses,
       });
     }
@@ -368,6 +402,7 @@ async function updatePrescriptionStatus(
      * BUILD UPDATE
      * -----------------------------------------------------
      */
+
     const updates = {};
 
     if (status) {
@@ -375,15 +410,22 @@ async function updatePrescriptionStatus(
     }
 
     /*
-     * Never allow the frontend to assign a random
-     * pharmacy while the user is a pharmacy account.
+     * Never allow a pharmacy account to assign
+     * the prescription to another pharmacy.
      */
-    if (req.user.role === 'PHARMACY') {
-      updates.pharmacyId = req.user.id;
+    if (
+      req.user.role === 'PHARMACY'
+    ) {
+      updates.pharmacyId =
+        req.user.id;
     } else if (pharmacyId) {
-      updates.pharmacyId = pharmacyId;
+      updates.pharmacyId =
+        pharmacyId;
     }
 
+    /*
+     * Update prescription.
+     */
     await prescription.update(
       updates
     );
@@ -393,17 +435,26 @@ async function updatePrescriptionStatus(
      * PHARMACY READY FOR DISPATCH
      * -----------------------------------------------------
      *
-     * When the pharmacy marks a prescription as
-     * ready_for_dispatch, create a delivery order.
+     * When pharmacy marks prescription as
+     * ready_for_dispatch:
+     *
+     * 1. Find the patient.
+     * 2. Get the patient's current contact details.
+     * 3. Create the DeliveryOrder.
+     *
+     * The delivery stores a snapshot of the patient's
+     * delivery information.
      */
     if (
       status === 'ready_for_dispatch'
     ) {
 
       /*
-       * Make sure a pharmacy has actually
-       * been assigned.
+       * ---------------------------------------------------
+       * MAKE SURE PHARMACY IS ASSIGNED
+       * ---------------------------------------------------
        */
+
       if (
         !prescription.pharmacyId
       ) {
@@ -414,8 +465,76 @@ async function updatePrescriptionStatus(
       }
 
       /*
-       * Prevent duplicate delivery orders.
+       * ---------------------------------------------------
+       * FIND PATIENT
+       * ---------------------------------------------------
+       *
+       * We deliberately retrieve the patient from the
+       * User table instead of trusting the frontend.
+       *
+       * This gives the dispatcher the actual:
+       *
+       * - name
+       * - phone
+       * - address
+       * - latitude
+       * - longitude
        */
+      const patient =
+        await User.findByPk(
+          prescription.patientId
+        );
+
+      if (!patient) {
+        return res.status(404).json({
+          error:
+            'Patient associated with this prescription was not found',
+        });
+      }
+
+      /*
+       * ---------------------------------------------------
+       * PATIENT DELIVERY INFORMATION
+       * ---------------------------------------------------
+       */
+
+      const resolvedPatientName =
+        patient.name ||
+        prescription.patientName;
+
+      const resolvedPatientPhone =
+        patient.phone ||
+        null;
+
+      /*
+       * Prefer the patient's saved address.
+       *
+       * patientAddress from the request is retained as a
+       * fallback so an existing workflow that sends an
+       * address does not break.
+       */
+      const resolvedPatientAddress =
+        patient.address ||
+        patientAddress ||
+        'Address not provided';
+
+      /*
+       * Patient coordinates.
+       */
+      const resolvedLatitude =
+        patient.locationLat ??
+        null;
+
+      const resolvedLongitude =
+        patient.locationLng ??
+        null;
+
+      /*
+       * ---------------------------------------------------
+       * PREVENT DUPLICATE DELIVERY
+       * ---------------------------------------------------
+       */
+
       let deliveryOrder =
         await DeliveryOrder.findOne({
           where: {
@@ -425,8 +544,11 @@ async function updatePrescriptionStatus(
         });
 
       /*
-       * Create delivery order only once.
+       * ---------------------------------------------------
+       * CREATE DELIVERY ORDER
+       * ---------------------------------------------------
        */
+
       if (!deliveryOrder) {
         deliveryOrder =
           await DeliveryOrder.create({
@@ -437,7 +559,14 @@ async function updatePrescriptionStatus(
               prescription.patientId,
 
             patientName:
-              prescription.patientName,
+              resolvedPatientName,
+
+            /*
+             * NEW:
+             * Patient phone number.
+             */
+            patientPhone:
+              resolvedPatientPhone,
 
             medications:
               prescription.medications,
@@ -448,12 +577,23 @@ async function updatePrescriptionStatus(
             pharmacyId:
               prescription.pharmacyId,
 
+            /*
+             * No dispatcher yet.
+             */
+            dispatchId:
+              null,
+
             status:
               'pending',
 
             patientAddress:
-              patientAddress ||
-              'Address not provided',
+              resolvedPatientAddress,
+
+            patientLocationLat:
+              resolvedLatitude,
+
+            patientLocationLng:
+              resolvedLongitude,
 
             timestamp:
               new Date().toISOString(),
@@ -471,6 +611,15 @@ async function updatePrescriptionStatus(
             patientId:
               deliveryOrder.patientId,
 
+            patientName:
+              deliveryOrder.patientName,
+
+            patientPhone:
+              deliveryOrder.patientPhone,
+
+            patientAddress:
+              deliveryOrder.patientAddress,
+
             pharmacyId:
               deliveryOrder.pharmacyId,
 
@@ -478,23 +627,86 @@ async function updatePrescriptionStatus(
               deliveryOrder.status,
           }
         );
+      } else {
+        /*
+         * -------------------------------------------------
+         * UPDATE EXISTING DELIVERY DETAILS
+         * -------------------------------------------------
+         *
+         * If a delivery somehow already exists, make sure
+         * its patient contact information is up to date.
+         */
+        await deliveryOrder.update({
+          patientName:
+            resolvedPatientName,
+
+          patientPhone:
+            resolvedPatientPhone,
+
+          patientAddress:
+            resolvedPatientAddress,
+
+          patientLocationLat:
+            resolvedLatitude,
+
+          patientLocationLng:
+            resolvedLongitude,
+        });
       }
 
       /*
-       * Broadcast delivery/prescription update
-       * if Socket.IO is available.
+       * ---------------------------------------------------
+       * PUBLIC DELIVERY PAYLOAD
+       * ---------------------------------------------------
+       *
+       * Always send the serialized delivery object.
        */
-      const io = req.app.get('io');
+      const publicDelivery =
+        deliveryOrder.toPublicJSON();
+
+      /*
+       * ---------------------------------------------------
+       * SOCKET.IO
+       * ---------------------------------------------------
+       */
+
+      const io =
+        req.app.get('io');
 
       if (io) {
+
+        /*
+         * Notify pharmacy.
+         */
+        io.emit(
+          'delivery:created',
+          publicDelivery
+        );
+
+        /*
+         * Notify dispatch dashboard.
+         */
+        io.emit(
+          'dispatch:new_delivery',
+          publicDelivery
+        );
+
+        /*
+         * Notify patient.
+         */
+        io.to(
+          `patient:${prescription.patientId}`
+        ).emit(
+          'delivery:created',
+          publicDelivery
+        );
+
+        /*
+         * Notify the prescription room/update.
+         */
         io.emit(
           'prescription:ready_for_dispatch',
           prescription
-        );
-
-        io.emit(
-          'delivery:created',
-          deliveryOrder
         );
       }
     }
@@ -504,7 +716,9 @@ async function updatePrescriptionStatus(
      * GENERAL PRESCRIPTION BROADCAST
      * -----------------------------------------------------
      */
-    const io = req.app.get('io');
+
+    const io =
+      req.app.get('io');
 
     if (io) {
       io.emit(
@@ -514,8 +728,11 @@ async function updatePrescriptionStatus(
     }
 
     /*
-     * Reload so the response contains the latest
-     * database values.
+     * -----------------------------------------------------
+     * RELOAD
+     * -----------------------------------------------------
+     *
+     * Ensure response contains latest database values.
      */
     await prescription.reload();
 
@@ -530,12 +747,21 @@ async function updatePrescriptionStatus(
     );
 
     return res.status(500).json({
-      error: 'Failed to update prescription',
-      message: error.message,
+      error:
+        'Failed to update prescription',
+
+      message:
+        error.message,
     });
   }
 }
 
+
+/**
+ * ---------------------------------------------------------
+ * EXPORTS
+ * ---------------------------------------------------------
+ */
 
 module.exports = {
   listPrescriptions,
